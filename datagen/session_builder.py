@@ -42,8 +42,20 @@ from datagen.messages_text import (
     render_clarify_response,
     render_opener,
     render_recommend_intro,
+    render_unsupported_claim_sentence,
 )
 from datagen.rng import bernoulli, weighted_choice
+
+# --- multi-label attribution redesign: two genuinely simulated mechanisms,
+# added alongside the 5 documented planted effects (DATA_MODEL.md SS6).
+# Deliberately NOT gated on agent_version: DATA_MODEL.md SS6 is explicit
+# that all 5 existing effects are version-differential by design, and a
+# 6th, undocumented version asymmetry here would risk the Investigation
+# segment scan surfacing it as a spurious extra "effect". These are
+# baseline noise mechanisms, present at the same rate in both arms.
+POOR_RANKING_RATE = 0.35
+POOR_RANKING_MIN_RATING_GAP = 0.15
+UNSUPPORTED_CLAIM_RATE = 0.08
 
 
 @dataclass
@@ -258,6 +270,8 @@ def build_session(
     top_satisfies = None
     violation_fired = False
     retrieval_failure = False
+    poor_ranking_fired = False
+    unsupported_claim_fired = False
 
     if not ends_abandoned:
         do_extra_recommend_tool()
@@ -283,6 +297,22 @@ def build_session(
             else:
                 top_pick = ranked_matches[0]
                 shown_pool = ranked_matches[:5]
+                # --- new mechanism: poor_ranking (genuinely simulated, not a
+                # relabeled "none" session). Only rolled when no constraint
+                # was violated and every candidate here already satisfies
+                # every stated constraint — poor_ranking and
+                # wrong_constraint_interpretation are mutually exclusive by
+                # construction, matching the documented boundary rule.
+                if (
+                    len(ranked_matches) >= 2
+                    and (ranked_matches[0]["rating"] - ranked_matches[1]["rating"]) >= POOR_RANKING_MIN_RATING_GAP
+                    and bernoulli(rng, POOR_RANKING_RATE)
+                ):
+                    demoted_pool = ranked_matches[1:]
+                    demoted_idx = int(rng.integers(0, len(demoted_pool)))
+                    top_pick = demoted_pool[demoted_idx]
+                    shown_pool = [top_pick] + [p for p in ranked_matches if p["product_id"] != top_pick["product_id"]]
+                    poor_ranking_fired = True
         else:
             retrieval_failure = True
             ranked_all = sorted(
@@ -297,7 +327,18 @@ def build_session(
 
         latency = max(60, int(rng.lognormal(5.3, 0.25)))
         add_action("recommend", latency)
-        add_message("agent", render_recommend_intro(rng, has_full_match=bool(matching) and not violation_fired), latency)
+        intro_text = render_recommend_intro(rng, has_full_match=bool(matching) and not violation_fired)
+        # --- new mechanism: unsupported_product_claim (genuinely simulated).
+        # Independent of retrieval/ranking outcome — a false claim about the
+        # recommended product can accompany any recommendation, so this is
+        # rolled unconditionally whenever a recommendation is made.
+        if bernoulli(rng, UNSUPPORTED_CLAIM_RATE):
+            absent_tags = [t for t in USE_CASE_TAGS if t not in top_pick["use_case_tags"]]
+            if absent_tags:
+                false_tag = str(weighted_choice(rng, absent_tags, [1.0] * len(absent_tags)))
+                intro_text = intro_text + " " + render_unsupported_claim_sentence(rng, false_tag)
+                unsupported_claim_fired = True
+        add_message("agent", intro_text, latency)
 
         for rank, product in enumerate(shown, start=1):
             satisfies = product_satisfies(product, constraints)
@@ -405,9 +446,33 @@ def build_session(
     elif retrieval_failure:
         scenario = "baseline"
         failure_mode = "retrieval_failure"
+    elif poor_ranking_fired:
+        scenario = "baseline"
+        failure_mode = "poor_ranking"
+    elif unsupported_claim_fired:
+        scenario = "baseline"
+        failure_mode = "unsupported_product_claim"
     else:
-        noise = weighted_choice(rng, ["poor_ranking", "unsupported_product_claim", "none"], [0.03, 0.02, 0.95])
-        failure_mode = str(noise)
+        failure_mode = "none"
+
+    # --- independent multi-label truth flags (validation artifact only).
+    # Unlike ground_truth_scenario/ground_truth_failure_mode above (a single
+    # priority-ordered label kept for backward compatibility with the old
+    # exclusive-classifier evaluation path), these six flags are
+    # independent: a session can legitimately have more than one True,
+    # because the underlying mechanisms genuinely can co-occur (e.g. a
+    # redundant-search session can also violate a stated constraint).
+    truth_unnecessary_clarification = template in ("clarified_success", "clarify_then_abandon") and bucket == "3+"
+    truth_wrong_constraint_interpretation = violation_fired
+    truth_retrieval_failure = retrieval_failure
+    # dead_end_abandon also does the same redundant-search anti-pattern
+    # (three do_search() calls with no intervening filter/clarify) as
+    # redundant_search_success — a real, observable tool-selection issue
+    # regardless of whether the session ultimately abandoned, matching the
+    # deterministic detector's definition (which is outcome-independent).
+    truth_wrong_tool_selection = template in ("redundant_search_success", "dead_end_abandon")
+    truth_poor_ranking = poor_ranking_fired
+    truth_unsupported_product_claim = unsupported_claim_fired
 
     num_turns = turn + 1
     total_latency_ms = sum(a["latency_ms"] for a in rows.agent_actions)
@@ -445,6 +510,12 @@ def build_session(
         "session_id": session_id,
         "ground_truth_scenario": scenario,
         "ground_truth_failure_mode": failure_mode,
+        "truth_unnecessary_clarification": truth_unnecessary_clarification,
+        "truth_wrong_constraint_interpretation": truth_wrong_constraint_interpretation,
+        "truth_retrieval_failure": truth_retrieval_failure,
+        "truth_wrong_tool_selection": truth_wrong_tool_selection,
+        "truth_poor_ranking": truth_poor_ranking,
+        "truth_unsupported_product_claim": truth_unsupported_product_claim,
     }
     return rows
 

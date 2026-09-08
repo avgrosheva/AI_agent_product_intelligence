@@ -33,7 +33,7 @@ describe('App routing', () => {
 
   it('renders the AI Quality page', async () => {
     renderWithProviders(<App />, { route: `/experiments/${EXPERIMENT_ID}/ai-quality`, path: '*' })
-    await waitFor(() => expect(screen.getByText('Failure-mode distribution')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Failure mechanism prevalence')).toBeInTheDocument())
   })
 
   it('redirects unknown routes to Overview', async () => {

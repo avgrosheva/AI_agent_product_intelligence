@@ -27,6 +27,7 @@ from backend.investigation.pipeline import run_investigation
 from backend.investigation.segments import build_segment_registry
 from backend.investigation.trajectory_attribution import _structural_features, reconstruct_trajectories
 from backend.analytics.stats.clustering import cluster_arrays
+from backend.llm.client import FAILURE_MECHANISMS
 
 pd.set_option("display.width", 220)
 pd.set_option("display.max_columns", 30)
@@ -95,7 +96,14 @@ def main() -> None:
     # --- Section 6/7: investigation, 3 lenses separately ---
     with engine.connect() as conn:
         actions = pd.read_sql(text("SELECT session_id, sequence_index, action_type::text AS action_type FROM agent_actions"), conn)
-        labels = pd.read_sql(text("SELECT session_id, failure_mode::text AS failure_mode FROM failure_labels"), conn)
+        labels_long = pd.read_sql(
+            text("SELECT session_id, failure_mode::text AS failure_mode, detected FROM session_failure_attributions"), conn
+        )
+    if labels_long.empty:
+        labels = pd.DataFrame(columns=["session_id", *FAILURE_MECHANISMS])
+    else:
+        labels = labels_long.pivot_table(index="session_id", columns="failure_mode", values="detected", aggfunc="first")
+        labels = labels.reindex(columns=list(FAILURE_MECHANISMS)).reset_index()
 
     investigations = {}
     for lens_name, metric_name in [("abandonment", "abandonment_rate"), ("conversion", "conversion_rate"), ("constraint_satisfaction", "constraint_satisfaction_rate")]:

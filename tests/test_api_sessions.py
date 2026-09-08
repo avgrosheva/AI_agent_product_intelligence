@@ -36,7 +36,7 @@ def test_list_sessions_failure_mode_filter(api_client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] > 0
-    assert all(item["failure_mode"] == "unnecessary_clarification" for item in body["items"])
+    assert all("unnecessary_clarification" in item["detected_failure_modes"] for item in body["items"])
 
 
 def test_list_sessions_empty_result_for_impossible_filter_combo(api_client):
@@ -91,14 +91,14 @@ def test_session_agent_actions_expose_no_hidden_reasoning(api_client):
         assert set(tool_call.keys()) == {"tool_name", "success", "error_type", "latency_ms", "action_sequence_index", "action_started_at"}
 
 
-def test_get_session_detail_includes_failure_classification_with_provenance(api_client):
+def test_get_session_detail_includes_failure_attributions_with_provenance(api_client):
     resp = api_client.get("/sessions", params={"failure_mode": "unnecessary_clarification", "limit": 1})
     session_id = resp.json()["items"][0]["session_id"]
     detail = api_client.get(f"/sessions/{session_id}").json()
-    fc = detail["failure_classification"]
-    assert fc is not None
-    assert fc["failure_mode"] == "unnecessary_clarification"
-    assert fc["source"] == "llm_classifier"
+    attributions = detail["failure_attributions"]
+    assert len(attributions) > 0
+    fc = next(a for a in attributions if a["failure_mode"] == "unnecessary_clarification")
+    assert fc["detector_source"] == "mock_llm"
     assert fc["provenance"]["is_mock"] is True
     assert fc["provenance"]["classifier_type"] == "rule_based_mock"
     assert fc["provenance"]["evaluation_status"] in ("evaluated_current", "evaluated_stale", "not_evaluated")

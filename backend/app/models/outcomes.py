@@ -3,15 +3,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.models.base import Base
 from backend.app.models.enums import (
+    DetectorSource,
     EvalType,
     Evaluator,
     FailureLabelSource,
+    FailureMechanism,
     FailureMode,
     ProductEventType,
 )
@@ -95,3 +97,43 @@ class FailureLabel(Base):
     )
     evidence_text: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(nullable=False)
+
+
+class SessionFailureAttribution(Base):
+    """Hybrid multi-label failure attribution (supersedes FailureLabel).
+
+    One row per (session_id, failure_mode) pair, for each of the six
+    FailureMechanism values — including detected=False rows, so
+    "none = no mechanism fired" is always derivable from the absence of any
+    detected=True row for a session, never itself a stored prediction.
+    `detector_source` distinguishes a deterministic rule (confidence/
+    evidence_text/provider/model/prompt_version all null — a deterministic
+    rule doesn't have a confidence score or a model) from a real or mock
+    LLM call (those fields populated). Ground truth is never written here —
+    it lives only in validation_ground_truth.parquet, offline.
+    """
+
+    __tablename__ = "session_failure_attributions"
+
+    attribution_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.session_id"), nullable=False, index=True
+    )
+    failure_mode: Mapped[FailureMechanism] = mapped_column(
+        pg_enum(FailureMechanism, "failure_mechanism_enum"), nullable=False
+    )
+    detected: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    detector_source: Mapped[DetectorSource] = mapped_column(
+        pg_enum(DetectorSource, "detector_source_enum"), nullable=False
+    )
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detector_version: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "failure_mode", name="uq_session_failure_attributions_session_mode"),
+    )

@@ -4,7 +4,7 @@
 
 from backend.app.models.base import Base
 from backend.app.models.core import Experiment, Product, User
-from backend.app.models.outcomes import Evaluation, FailureLabel, ProductEvent, Recommendation
+from backend.app.models.outcomes import Evaluation, FailureLabel, ProductEvent, Recommendation, SessionFailureAttribution
 from backend.app.models.sessions import AgentAction, Message, Session, ToolCall
 
 __all__ = [
@@ -20,4 +20,5 @@ __all__ = [
     "ProductEvent",
     "Evaluation",
     "FailureLabel",
+    "SessionFailureAttribution",
 ]

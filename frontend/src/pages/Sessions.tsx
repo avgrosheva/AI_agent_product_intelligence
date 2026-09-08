@@ -122,7 +122,7 @@ export function Sessions() {
                       <td>{s.requested_category}, {s.constraint_count_bucket} constraints</td>
                       <td>{s.platform}</td>
                       <td><span className={`chip ${OUTCOME_CHIP[s.outcome] ?? 'chip-neutral'}`}>{s.outcome.replace(/_/g, ' ')}</span></td>
-                      <td>{s.failure_mode ?? '—'}</td>
+                      <td>{s.detected_failure_modes.length > 0 ? s.detected_failure_modes.join(', ') : '—'}</td>
                       <td className="mono">{s.total_latency_ms.toLocaleString('en-US')}ms</td>
                       <td className="mono">${s.total_cost_usd.toFixed(4)}</td>
                       <td className="text-muted">{formatDateTime(s.started_at)}</td>

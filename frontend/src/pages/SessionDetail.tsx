@@ -46,17 +46,23 @@ export function SessionDetail() {
         </div>
       </div>
 
-      {session.failure_classification && (
+      {session.failure_attributions.length > 0 && (
         <>
-          <MockClassifierBanner provenance={session.failure_classification.provenance} />
+          <MockClassifierBanner provenance={session.failure_attributions[0].provenance} />
           <div className="card">
-            <div className="card-header"><h2>Failure classification</h2></div>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
-              <span className="chip chip-warning">{session.failure_classification.failure_mode.replace(/_/g, ' ')}</span>
-              <span className="text-muted" style={{ fontSize: 12 }}>confidence {(session.failure_classification.confidence * 100).toFixed(0)}%</span>
-              <span className="text-muted" style={{ fontSize: 12 }}>source: {session.failure_classification.source}</span>
-            </div>
-            <p style={{ fontSize: 13 }}>{session.failure_classification.evidence_text}</p>
+            <div className="card-header"><h2>Detected failure mechanisms</h2><p>A session can have zero, one, or several — mechanisms are not mutually exclusive.</p></div>
+            {session.failure_attributions.map((f) => (
+              <div key={f.failure_mode} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 4 }}>
+                  <span className="chip chip-warning">{f.failure_mode.replace(/_/g, ' ')}</span>
+                  <span className="text-muted" style={{ fontSize: 12 }}>source: {f.detector_source.replace(/_/g, ' ')}</span>
+                  {f.confidence !== null && (
+                    <span className="text-muted" style={{ fontSize: 12 }}>confidence {(f.confidence * 100).toFixed(0)}%</span>
+                  )}
+                </div>
+                {f.evidence_text && <p style={{ fontSize: 13 }}>{f.evidence_text}</p>}
+              </div>
+            ))}
           </div>
         </>
       )}

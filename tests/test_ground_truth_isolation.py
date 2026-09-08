@@ -58,7 +58,17 @@ def test_validation_artifact_exists_and_is_separate_from_application_dir(dev_dat
 
 def test_validation_artifact_has_expected_columns_and_planted_scenarios(dev_data_dir):
     df = pd.read_parquet(dev_data_dir / "dev" / "validation_ground_truth.parquet")
-    assert set(df.columns) == {"session_id", "ground_truth_scenario", "ground_truth_failure_mode"}
+    assert set(df.columns) == {
+        "session_id",
+        "ground_truth_scenario",
+        "ground_truth_failure_mode",
+        "truth_unnecessary_clarification",
+        "truth_wrong_constraint_interpretation",
+        "truth_retrieval_failure",
+        "truth_wrong_tool_selection",
+        "truth_poor_ranking",
+        "truth_unsupported_product_claim",
+    }
 
     expected_scenarios = {
         "baseline",

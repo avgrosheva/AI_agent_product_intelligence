@@ -61,10 +61,18 @@ class MetricResultSchema(BaseModel):
 class ClassifierProvenance(BaseModel):
     """Stage 3 review requirement #2: any response surfacing
     classifier-derived data must carry this, and a mock classifier's
-    numbers must never be presentable as real-LLM performance."""
+    numbers must never be presentable as real-LLM performance.
 
-    classifier_type: Literal["rule_based_mock", "anthropic", "unknown", "not_classified"]
+    provider/model are populated only when classifier_type == "real_llm"
+    (e.g. provider="openrouter", model="anthropic/claude-sonnet-5"),
+    parsed from classifier_version — see
+    backend.llm.provenance.parse_real_llm_version. Both are None for the
+    mock and for the not-yet-classified states."""
+
+    classifier_type: Literal["rule_based_mock", "real_llm", "unknown", "not_classified"]
     classifier_version: str | None = None
+    provider: str | None = None
+    model: str | None = None
     is_mock: bool
     evaluation_status: Literal["evaluated_current", "evaluated_stale", "not_evaluated", "not_classified"]
     run_at: str | None = None

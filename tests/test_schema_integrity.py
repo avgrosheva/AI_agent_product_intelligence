@@ -21,6 +21,7 @@ def test_all_expected_tables_exist(db_engine):
     expected = {
         "users", "products", "experiments", "sessions", "messages", "agent_actions",
         "tool_calls", "recommendations", "product_events", "evaluations", "failure_labels",
+        "session_failure_attributions",
     }
     assert expected.issubset(tables)
 
@@ -59,16 +60,27 @@ def test_row_counts_are_nonzero_where_expected(db_engine):
 
 @pytest.mark.order(1)
 def test_failure_labels_is_empty_in_stage_1(db_engine):
-    """Stage 1 leaves failure_labels empty: classification is Stage 3
-    (AI_EVALUATION.md, ROADMAP.md Stage 3). See PRD deviations note.
+    """failure_labels is the old exclusive-classifier table, deprecated by
+    the hybrid multi-label redesign (backend.app.models.enums) — nothing
+    writes to it anymore, so unlike session_failure_attributions below this
+    stays empty permanently, not just in Stage 1.
 
     Pinned to run first (pytest-order) rather than relying on alphabetical
     file-collection order: db_engine's truncate-and-reload is session-scoped
     (runs once), and later tests/validate_ground_truth.py's classified_engine
-    fixture populates failure_labels on top of that same session — this
-    assertion is only meaningful if it observes the DB before that happens.
+    fixture populates session_failure_attributions on top of that same
+    session — this assertion is only meaningful if it observes the DB
+    before that happens.
     """
     assert _scalar(db_engine, "SELECT count(*) FROM failure_labels") == 0
+
+
+@pytest.mark.order(1)
+def test_session_failure_attributions_is_empty_in_stage_1(db_engine):
+    """Stage 1 leaves session_failure_attributions empty: classification is
+    Stage 3 (AI_EVALUATION.md, ROADMAP.md Stage 3). Same ordering rationale
+    as test_failure_labels_is_empty_in_stage_1 above."""
+    assert _scalar(db_engine, "SELECT count(*) FROM session_failure_attributions") == 0
 
 
 def test_enum_columns_only_contain_documented_values(db_engine):

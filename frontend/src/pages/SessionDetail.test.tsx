@@ -19,7 +19,7 @@ describe('SessionDetail page', () => {
     await waitFor(() => expect(screen.getByText(/I need a monitor under \$300/)).toBeInTheDocument())
     expect(screen.getByText(/Could you clarify your preferred screen size/)).toBeInTheDocument()
     expect(screen.getByText('search_products')).toBeInTheDocument()
-    expect(screen.getByText('Failure classification')).toBeInTheDocument()
+    expect(screen.getByText('Detected failure mechanisms')).toBeInTheDocument()
     expect(screen.getByText('unnecessary clarification')).toBeInTheDocument()
   })
 

@@ -1,7 +1,8 @@
 """Investigation pipeline orchestration (INVESTIGATION.md SS3).
 
 Operates only on observable application data passed in by the caller
-(session-level base query + agent_actions + failure_labels) — never
+(session-level base query + agent_actions + session_failure_attributions,
+wide-format) — never
 validation_ground_truth.parquet, generation_manifest.json, Stage 2's
 effect-verification helpers, or has_consecutive_search (Stage 2 review
 requirement #4). tests/validate_ground_truth.py is the only place ground
@@ -33,7 +34,7 @@ from backend.investigation.trajectory_attribution import (
     reconstruct_trajectories,
     test_pattern_outcome_association,
 )
-from backend.llm.client import FAILURE_TAXONOMY
+from backend.llm.client import FAILURE_MECHANISMS
 
 
 @dataclass
@@ -66,7 +67,7 @@ class InvestigationResult:
 def _dominant_failure_mode(attribution: FailureAttributionResult) -> str | None:
     if not attribution.reportable:
         return None
-    reportable_modes = [m for m in attribution.per_mode if m.failure_mode != "none" and m.share_of_excess_abandonment is not None]
+    reportable_modes = [m for m in attribution.per_mode if m.share_of_excess_abandonment is not None]
     if not reportable_modes:
         return None
     return max(reportable_modes, key=lambda m: m.share_of_excess_abandonment).failure_mode
@@ -75,7 +76,7 @@ def _dominant_failure_mode(attribution: FailureAttributionResult) -> str | None:
 def run_investigation(
     base_df: pd.DataFrame,
     agent_actions_df: pd.DataFrame,
-    failure_labels_df: pd.DataFrame,
+    failure_attributions_wide_df: pd.DataFrame,
     primary_metric_name: str = "conversion_rate",
     top_k: int = TOP_K_FINDINGS,
 ) -> InvestigationResult:
@@ -90,7 +91,12 @@ def run_investigation(
     explored_not_significant = len(scan_rows) - len(top_rows)
 
     trajectories = reconstruct_trajectories(agent_actions_df)
-    merged_with_labels = base_df.merge(failure_labels_df, on="session_id", how="left")
+    merged_with_labels = base_df.merge(failure_attributions_wide_df, on="session_id", how="left")
+    # NaN means "no attribution row for this session" (never classified, or
+    # a semantic call failed and wrote nothing that run) — treated as
+    # not-detected for this aggregate decomposition, same simplification
+    # the old exclusive labeling made implicitly by defaulting to "none".
+    merged_with_labels[list(FAILURE_MECHANISMS)] = merged_with_labels[list(FAILURE_MECHANISMS)].fillna(False)
     merged_with_labels = merged_with_labels.merge(trajectories, on="session_id", how="left")
 
     all_trajectory_p_values: list[float] = []
@@ -101,7 +107,7 @@ def run_investigation(
         seg_mask = row.segment.mask_fn(merged_with_labels)
         seg_df = merged_with_labels[seg_mask]
 
-        attribution = compute_failure_attribution(seg_df, FAILURE_TAXONOMY)
+        attribution = compute_failure_attribution(seg_df, FAILURE_MECHANISMS)
         attribution.segment_label = row.segment.label
 
         # Trajectory association: restricted to sessions that reached an

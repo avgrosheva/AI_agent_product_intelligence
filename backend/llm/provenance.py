@@ -19,6 +19,15 @@ The API cross-references the two: if their classifier_type/version match,
 the currently-loaded failure_labels have a corresponding evaluation on
 record; if not (or the evaluation file is missing), that is surfaced
 explicitly rather than silently reusing a stale or absent evaluation.
+
+A third, independent file — real_llm_evaluation_summary.json, written by
+scripts/run_real_llm_evaluation.py — holds the real-LLM subset evaluation
+(provider, model, prompt version, seed, per-class metrics, cost, etc). It
+is deliberately never the same file/path as the mock's evaluation summary:
+the real-LLM run evaluates a few hundred sessions, not the full dataset,
+and must never be presented as if it were the mock's (or vice versa) —
+mock and real evaluation results are always distinguishable by which file
+they came from.
 """
 
 from __future__ import annotations
@@ -30,27 +39,67 @@ from pathlib import Path
 
 METADATA_PATH = Path("data/classifier_metadata.json")
 EVALUATION_SUMMARY_PATH = Path("reports/stage3/classifier_evaluation_summary.json")
+REAL_LLM_EVALUATION_SUMMARY_PATH = Path("reports/final/real_llm_evaluation_summary.json")
 
 MOCK_CLASSIFIER_VERSION = "rule_based_mock-v1"
-ANTHROPIC_CLASSIFIER_VERSION = "anthropic-claude-sonnet-5-v1"
+
+# Overall pipeline design version: distinguishes classifier_metadata.json
+# snapshots written by the old exclusive-classifier pipeline (one
+# FailureClassification per session, written to failure_labels) from the
+# current hybrid multi-label pipeline (deterministic + semantic detectors,
+# written to session_failure_attributions). A metadata record missing this
+# field entirely is from before the redesign.
+DETECTOR_ARCHITECTURE_VERSION = "hybrid_multi_label_v1"
+
+
+def real_llm_classifier_version(provider: str, model: str) -> str:
+    """classifier_version string for a real LLM client: "provider:model",
+    e.g. "openrouter:anthropic/claude-sonnet-5". A single string keeps
+    ClassifierMetadata's shape unchanged (no sidecar schema migration);
+    parse_real_llm_version below recovers both fields for the API."""
+    return f"{provider}:{model}"
+
+
+def parse_real_llm_version(classifier_version: str) -> tuple[str, str] | None:
+    """Inverse of real_llm_classifier_version. Returns (provider, model),
+    or None if classifier_version isn't in "provider:model" form (e.g. the
+    mock's plain "rule_based_mock-v1")."""
+    if ":" not in classifier_version:
+        return None
+    provider, _, model = classifier_version.partition(":")
+    return provider, model
 
 
 @dataclass
 class ClassifierMetadata:
-    classifier_type: str    # "rule_based_mock" | "anthropic"
+    classifier_type: str    # "rule_based_mock" | "real_llm"
     classifier_version: str
     is_mock: bool
     run_at: str              # ISO timestamp
     n_sessions_classified: int
+    # Added for the hybrid multi-label redesign; defaulted so a metadata
+    # file written by the old pipeline still loads (as
+    # detector_architecture_version=None, distinguishable from a current run).
+    detector_architecture_version: str | None = None
+    semantic_prompt_version: str | None = None
 
 
-def write_classifier_metadata(classifier_type: str, classifier_version: str, is_mock: bool, n_sessions: int) -> None:
+def write_classifier_metadata(
+    classifier_type: str,
+    classifier_version: str,
+    is_mock: bool,
+    n_sessions: int,
+    detector_architecture_version: str | None = None,
+    semantic_prompt_version: str | None = None,
+) -> None:
     meta = ClassifierMetadata(
         classifier_type=classifier_type,
         classifier_version=classifier_version,
         is_mock=is_mock,
         run_at=datetime.now(timezone.utc).isoformat(),
         n_sessions_classified=n_sessions,
+        detector_architecture_version=detector_architecture_version,
+        semantic_prompt_version=semantic_prompt_version,
     )
     METADATA_PATH.parent.mkdir(parents=True, exist_ok=True)
     METADATA_PATH.write_text(json.dumps(asdict(meta), indent=2), encoding="utf-8")
@@ -78,6 +127,47 @@ def read_evaluation_summary() -> dict | None:
     if not EVALUATION_SUMMARY_PATH.exists():
         return None
     return json.loads(EVALUATION_SUMMARY_PATH.read_text(encoding="utf-8"))
+
+
+def write_real_llm_evaluation_summary(summary: dict) -> None:
+    """Persists the real-LLM subset evaluation, independent of
+    classifier_metadata.json and the mock's classifier_evaluation_summary.json
+    (see module docstring). `summary` is expected to already contain
+    provider/model/prompt_version/evaluation_seed/subset_size/metrics —
+    this function only stamps evaluated_at and writes the file."""
+    payload = {"evaluated_at": datetime.now(timezone.utc).isoformat(), **summary}
+    REAL_LLM_EVALUATION_SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    REAL_LLM_EVALUATION_SUMMARY_PATH.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+
+
+def read_real_llm_evaluation_summary() -> dict | None:
+    if not REAL_LLM_EVALUATION_SUMMARY_PATH.exists():
+        return None
+    return json.loads(REAL_LLM_EVALUATION_SUMMARY_PATH.read_text(encoding="utf-8"))
+
+
+def current_classifier_provenance_fields() -> dict:
+    """Shared by both routers that surface classifier provenance
+    (sessions.py, ai_quality.py) so the classifier_type/provider/model
+    parsing logic exists in exactly one place. Returns kwargs ready to
+    pass into the ClassifierProvenance schema; callers still supply their
+    own `evaluation_status` since that's endpoint-independent context."""
+    meta = read_classifier_metadata()
+    if meta is None:
+        return {"classifier_type": "not_classified", "is_mock": False}
+    provider, model = (None, None)
+    if not meta.is_mock:
+        parsed = parse_real_llm_version(meta.classifier_version)
+        if parsed is not None:
+            provider, model = parsed
+    return {
+        "classifier_type": meta.classifier_type,
+        "classifier_version": meta.classifier_version,
+        "provider": provider,
+        "model": model,
+        "is_mock": meta.is_mock,
+        "run_at": meta.run_at,
+    }
 
 
 def get_evaluation_status() -> str:

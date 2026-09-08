@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.app.routers import ai_quality, experiments, investigation, sessions
+from backend.app.routers import ai_quality, experiments, ingestion, investigation, sessions
 from backend.app.schemas.common import ErrorResponse
 from backend.app.warmup import run_startup_warmup
 
@@ -66,6 +66,7 @@ app.include_router(experiments.router)
 app.include_router(investigation.router)
 app.include_router(sessions.router)
 app.include_router(ai_quality.router)
+app.include_router(ingestion.router)
 
 
 @app.get("/health", tags=["health"])

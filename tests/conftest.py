@@ -4,24 +4,70 @@ Running `pytest` end to end: (1) regenerates the dev dataset deterministically,
 (2) applies the Alembic baseline migration (idempotent), (3) loads the
 generated application tables into Postgres. Requires the project's Postgres
 container to be running (see README / docs/ROADMAP.md Stage 1).
+
+Database isolation (fixed after a real incident: running this suite
+truncated and overwrote the demo dataset, because tests and the local demo
+app both defaulted to the same `ai_agent_pi` database with nothing to tell
+them apart). Before any fixture or backend module resolves a database URL,
+this file forces DATABASE_URL to a separate database on the same Postgres
+instance (`ai_agent_pi_test` by default, overridable via TEST_DATABASE_URL
+for CI) and creates that database if it doesn't exist yet. Every fixture
+below still runs exactly the same generate/migrate/load steps, just
+against that database — behavior stays deterministic, and nothing here
+requires OPENROUTER_API_KEY or any live API access (classified_engine uses
+RuleBasedMockClient, never a real LLM client). test_db_isolation.py is a
+regression test that fails loudly if this override is ever removed.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 
-from backend.app.db import get_database_url
+from backend.app.db import DEFAULT_DATABASE_URL, get_database_url
 from datagen.generate import generate_dataset
 from datagen.load_to_postgres import load_dataset
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
 DEV_SEED = 42
+
+DEMO_DATABASE_NAME = make_url(DEFAULT_DATABASE_URL).database  # "ai_agent_pi" — must never be the test target
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL") or make_url(DEFAULT_DATABASE_URL).set(database=f"{DEMO_DATABASE_NAME}_test").render_as_string(hide_password=False)
+
+_test_url = make_url(TEST_DATABASE_URL)
+assert _test_url.database != DEMO_DATABASE_NAME, (
+    f"TEST_DATABASE_URL must not point at the demo database '{DEMO_DATABASE_NAME}' — "
+    "tests must run against an isolated database."
+)
+
+# Force every get_database_url() call made from inside this pytest process
+# (by fixtures below, by the FastAPI app under TestClient, by alembic in
+# the subprocess spawned below, which inherits this env) onto the test
+# database, regardless of whatever DATABASE_URL the calling shell set for
+# local demo use.
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+
+
+def _ensure_test_database_exists(test_db_url: str) -> None:
+    url = make_url(test_db_url)
+    maintenance_engine = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    try:
+        with maintenance_engine.connect() as conn:
+            exists = conn.execute(text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": url.database}).scalar()
+            if not exists:
+                conn.execute(text(f'CREATE DATABASE "{url.database}"'))
+    finally:
+        maintenance_engine.dispose()
+
+
+_ensure_test_database_exists(TEST_DATABASE_URL)
 
 
 @pytest.fixture(scope="session")
@@ -37,6 +83,14 @@ def dev_data_dir(dev_seed) -> Path:
 
 @pytest.fixture(scope="session")
 def db_engine(dev_data_dir):
+    # Last-line-of-defense re-check, right before the truncating load: if
+    # anything between module import and here reset DATABASE_URL to the
+    # demo database, refuse to run rather than destroy demo data again.
+    resolved = make_url(get_database_url()).database
+    assert resolved != DEMO_DATABASE_NAME, (
+        f"DATABASE_URL resolved to the demo database '{DEMO_DATABASE_NAME}' inside a test fixture — "
+        "refusing to truncate it. This must stay pointed at TEST_DATABASE_URL."
+    )
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=PROJECT_ROOT,

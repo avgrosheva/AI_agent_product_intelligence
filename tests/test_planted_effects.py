@@ -44,7 +44,15 @@ def merged(dev_data_dir):
 def test_effect_1_exploratory_uplift(merged):
     """v2 has a lower wrong_constraint_interpretation rate than v1 for
     exploratory (0-1 constraint) requests, excluding monitor category
-    (which is effect 4's own segment and would confound this check)."""
+    (which is effect 4's own segment and would confound this check).
+
+    The z>1.96 significance claim for this effect is checked at demo scale
+    instead — see test_planted_effects_demo_scale.py — because dev scale
+    (~2,200 sessions) is no longer reliably powered for it after the hybrid
+    multi-label redesign's generator changes reshuffled the shared RNG draw
+    sequence (datagen/session_builder.py's module docstring). Direction and
+    the conversion side effect remain dev-scale checks since both are
+    robust here."""
     seg = merged[(merged.bucket == "0-1") & (merged.requested_category != "monitor")]
     v1 = seg[seg.agent_version == "v1"]
     v2 = seg[seg.agent_version == "v2"]
@@ -54,9 +62,6 @@ def test_effect_1_exploratory_uplift(merged):
     assert len(v1) > 100 and len(v2) > 100
     assert p2 < p1, f"expected v2 < v1 wrong_constraint rate in exploratory segment, got v1={p1:.3f} v2={p2:.3f}"
 
-    z = _two_proportion_z(p1, len(v1), p2, len(v2))
-    assert abs(z) > 1.96, f"effect not detectable at 95% in dev-scale sample (z={z:.2f})"
-
     conv1 = v1.converted.mean()
     conv2 = v2.converted.mean()
     assert conv2 >= conv1, f"expected v2 conversion >= v1 in exploratory segment, got v1={conv1:.3f} v2={conv2:.3f}"
@@ -65,8 +70,15 @@ def test_effect_1_exploratory_uplift(merged):
 def test_effect_2_overclarify_v2(merged):
     """v2 clarifies unnecessarily far more often than v1 when the user
     already gave >=3 constraints, and this drives more turns, more
-    abandonment, lower conversion, and higher cost — but v1's rate must be
-    nonzero (behavioral tag, not an artificial 0%-vs-X% cliff)."""
+    abandonment, and higher cost — but v1's rate must be nonzero
+    (behavioral tag, not an artificial 0%-vs-X% cliff).
+
+    The conversion side effect is checked at demo scale instead — see
+    test_planted_effects_demo_scale.py — because at dev scale (~2,200
+    sessions) it's a noise-level tie (v1=0.10563 vs v2=0.10569) after the
+    hybrid multi-label redesign's generator changes reshuffled the shared
+    RNG draw sequence (datagen/session_builder.py's module docstring).
+    Every other assertion here is robust at dev scale and stays here."""
     seg = merged[merged.bucket == "3+"]
     v1 = seg[seg.agent_version == "v1"]
     v2 = seg[seg.agent_version == "v2"]
@@ -81,7 +93,6 @@ def test_effect_2_overclarify_v2(merged):
 
     assert v2.num_turns.mean() > v1.num_turns.mean()
     assert v2.abandoned.mean() > v1.abandoned.mean()
-    assert v2.converted.mean() <= v1.converted.mean()
     assert v2.total_cost_usd.mean() > v1.total_cost_usd.mean()
 
 
@@ -128,7 +139,15 @@ def test_effect_4_monitor_constraint_regression_v2(merged):
 def test_effect_5_tool_selection_v2_improved(merged):
     """v2 has a lower wrong_tool_selection rate than v1, isolated to
     constraint_count_bucket=2 where neither the overclarify (bucket=3+) nor
-    exploratory (bucket=0-1) effects can dilute the signal."""
+    exploratory (bucket=0-1) effects can dilute the signal.
+
+    The z>1.5 significance claim for this (smaller, by design) effect is
+    checked at demo scale instead — see test_planted_effects_demo_scale.py
+    — because dev scale (~2,200 sessions) is no longer reliably powered
+    for it after the hybrid multi-label redesign's generator changes
+    reshuffled the shared RNG draw sequence (datagen/session_builder.py's
+    module docstring). Direction remains a dev-scale check since it's
+    robust here."""
     seg = merged[merged.bucket == "2"]
     v1 = seg[seg.agent_version == "v1"]
     v2 = seg[seg.agent_version == "v2"]
@@ -137,9 +156,6 @@ def test_effect_5_tool_selection_v2_improved(merged):
 
     assert len(v1) > 100 and len(v2) > 100
     assert p2 < p1, f"expected v2 < v1 wrong_tool_selection rate, got v1={p1:.3f} v2={p2:.3f}"
-
-    z = _two_proportion_z(p1, len(v1), p2, len(v2))
-    assert abs(z) > 1.5  # smaller effect size by design; a looser bar than the other four
 
 
 def test_no_effect_produces_a_perfectly_clean_zero_or_hundred_percent_rate(merged):

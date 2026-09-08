@@ -43,13 +43,14 @@ export function AIQuality() {
       </div>
 
       <div className="card">
-        <div className="card-header"><h2>Failure-mode distribution</h2><p>Share of sessions per version labeled with each conversational failure mode.</p></div>
+        <div className="card-header"><h2>Failure mechanism prevalence</h2><p>Share of sessions where each mechanism's detector fired — mechanisms can overlap, so rates do not sum to 100%.</p></div>
         <table className="data-table">
-          <thead><tr><th>Failure mode</th><th>v1 rate</th><th>v1 count</th><th>v2 rate</th><th>v2 count</th></tr></thead>
+          <thead><tr><th>Mechanism</th><th>Source</th><th>v1 rate</th><th>v1 count</th><th>v2 rate</th><th>v2 count</th></tr></thead>
           <tbody>
-            {quality.failure_mode_distribution.map((f) => (
+            {quality.failure_mechanism_prevalence.map((f) => (
               <tr key={f.failure_mode}>
                 <td>{f.failure_mode.replace(/_/g, ' ')}</td>
+                <td className="text-muted">{f.detector_source.replace(/_/g, ' ')}</td>
                 <td className="mono">{formatPercent(f.rate_v1)}</td>
                 <td className="text-muted">{f.count_v1}</td>
                 <td className="mono">{formatPercent(f.rate_v2)}</td>

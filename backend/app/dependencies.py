@@ -31,6 +31,7 @@ from sqlalchemy.engine import Engine
 
 from backend.app.db import get_database_url
 from backend.analytics.sql_runner import run_sql_file
+from backend.llm.client import FAILURE_MECHANISMS
 
 
 @lru_cache(maxsize=1)
@@ -72,12 +73,37 @@ def get_agent_actions_df() -> pd.DataFrame:
 
 
 @lru_cache(maxsize=1)
-def get_failure_labels_df() -> pd.DataFrame:
+def get_failure_attributions_df() -> pd.DataFrame:
+    """Long format, one row per (session_id, failure_mode) — mirrors
+    session_failure_attributions directly (supersedes the old
+    get_failure_labels_df/failure_labels path). Use
+    get_failure_attributions_wide_df for anything that needs to merge this
+    onto session-level data."""
     with get_engine().connect() as conn:
         return pd.read_sql(
-            text("SELECT session_id, failure_mode::text AS failure_mode, confidence, evidence_text FROM failure_labels"),
+            text(
+                "SELECT session_id, failure_mode::text AS failure_mode, detected, "
+                "detector_source::text AS detector_source, confidence, evidence_text "
+                "FROM session_failure_attributions"
+            ),
             conn,
         )
+
+
+@lru_cache(maxsize=1)
+def get_failure_attributions_wide_df() -> pd.DataFrame:
+    """One row per session_id, one boolean column per FAILURE_MECHANISMS
+    entry (True where a detector fired detected=True). A session with no
+    attribution rows at all (never classified, or a semantic call failed
+    and wrote no rows that run) gets NaN in every column after a
+    left-merge onto session-level data — callers must treat NaN as "not
+    evaluated," never coerce it to False."""
+    long_df = get_failure_attributions_df()
+    if long_df.empty:
+        return pd.DataFrame(columns=["session_id", *FAILURE_MECHANISMS])
+    wide = long_df.pivot_table(index="session_id", columns="failure_mode", values="detected", aggfunc="first")
+    wide = wide.reindex(columns=list(FAILURE_MECHANISMS))
+    return wide.reset_index()
 
 
 def get_experiment_or_404(experiment_id: str) -> dict:

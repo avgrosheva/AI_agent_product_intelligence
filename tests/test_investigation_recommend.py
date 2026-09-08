@@ -102,4 +102,5 @@ def test_recommendation_verdict_is_never_produced_by_an_llm_call():
     source = inspect.getsource(recommend_module.synthesize_recommendation)
     assert "LLMClient" not in source
     assert ".classify_failure(" not in source
+    assert ".classify_semantic(" not in source
     assert "anthropic" not in source.lower()

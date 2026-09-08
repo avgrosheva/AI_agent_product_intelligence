@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from backend.llm.client import FAILURE_TAXONOMY
+from backend.llm.client import DETERMINISTIC_MECHANISMS, FAILURE_MECHANISMS, FAILURE_TAXONOMY
 
 
 def test_ai_quality_summary_schema(api_client, experiment_id):
     resp = api_client.get(f"/experiments/{experiment_id}/ai-quality")
     assert resp.status_code == 200
     body = resp.json()
-    modes = {item["failure_mode"] for item in body["failure_mode_distribution"]}
-    assert modes == set(FAILURE_TAXONOMY)
+    items = body["failure_mechanism_prevalence"]
+    modes = {item["failure_mode"] for item in items}
+    assert modes == set(FAILURE_MECHANISMS)
+    for item in items:
+        expected_source = "deterministic" if item["failure_mode"] in DETERMINISTIC_MECHANISMS else "mock_llm"
+        assert item["detector_source"] == expected_source
     assert body["tool_use_quality"]["tool_calls_per_session_v1"] > 0
     assert body["classifier_provenance"]["is_mock"] is True
 
@@ -31,21 +35,25 @@ def test_ai_quality_unknown_experiment_404(api_client):
 
 
 def test_classifier_evaluation_endpoint(api_client):
+    """The old exclusive-classifier evaluation summary was archived when
+    the hybrid multi-label redesign shipped (it evaluated a taxonomy this
+    pipeline no longer produces) — until a semantic-mechanism-specific
+    Stage 3 evaluation is written, this endpoint honestly reports
+    "not evaluated" rather than presenting stale/mismatched numbers."""
     resp = api_client.get("/ai-quality/classifier-evaluation")
     assert resp.status_code == 200
     body = resp.json()
     assert body["provenance"]["classifier_type"] == "rule_based_mock"
     assert body["provenance"]["is_mock"] is True
-    assert body["all_acceptance_bars_met"] is True
-    priority_classes = {b["failure_mode"] for b in body["acceptance_bars"]}
-    assert priority_classes == {"unnecessary_clarification", "wrong_constraint_interpretation"}
+    assert body["all_acceptance_bars_met"] is None
+    assert body["per_class_metrics"] == []
 
 
 def test_classifier_evaluation_never_labeled_as_real_llm_performance(api_client):
     """Stage 3 review requirement #2: a mock classifier's accuracy must
     never be presentable as real LLM classifier performance."""
     body = api_client.get("/ai-quality/classifier-evaluation").json()
-    assert body["provenance"]["classifier_type"] != "anthropic"
+    assert body["provenance"]["classifier_type"] != "real_llm"
     assert body["provenance"]["is_mock"] is True
 
 

@@ -14,27 +14,20 @@ from backend.app.schemas.ai_quality import (
     ClassifierAcceptanceBar,
     ClassifierEvaluationResponse,
     ClassifierPerClassMetric,
-    FailureModeDistributionItem,
+    FailureMechanismPrevalenceItem,
     ToolUseQualitySchema,
     TrajectoryPatternFrequencyItem,
 )
 from backend.app.schemas.common import ClassifierProvenance
 from backend.investigation.trajectory_attribution import canonicalize_patterns, reconstruct_trajectories
-from backend.llm.client import FAILURE_TAXONOMY
-from backend.llm.provenance import get_evaluation_status, read_classifier_metadata, read_evaluation_summary
+from backend.llm.client import DETERMINISTIC_MECHANISMS, FAILURE_MECHANISMS
+from backend.llm.provenance import current_classifier_provenance_fields, get_evaluation_status, read_evaluation_summary
 
 router = APIRouter(tags=["ai-quality"])
 
 
 def _classifier_provenance() -> ClassifierProvenance:
-    meta = read_classifier_metadata()
-    status = get_evaluation_status()
-    if meta is None:
-        return ClassifierProvenance(classifier_type="not_classified", is_mock=False, evaluation_status=status)
-    return ClassifierProvenance(
-        classifier_type=meta.classifier_type, classifier_version=meta.classifier_version,
-        is_mock=meta.is_mock, evaluation_status=status, run_at=meta.run_at,
-    )
+    return ClassifierProvenance(evaluation_status=get_evaluation_status(), **current_classifier_provenance_fields())
 
 
 @router.get("/experiments/{experiment_id}/ai-quality", response_model=AIQualitySummaryResponse)
@@ -46,29 +39,36 @@ def get_ai_quality_summary(experiment_id: str) -> AIQualitySummaryResponse:
         rows = conn.execute(
             text(
                 """
-                SELECT s.agent_version::text AS agent_version, fl.failure_mode::text AS failure_mode, count(*) AS n
-                FROM failure_labels fl JOIN sessions s ON s.session_id = fl.session_id
-                WHERE s.experiment_id = :eid
+                SELECT s.agent_version::text AS agent_version, sfa.failure_mode::text AS failure_mode, count(*) AS n
+                FROM session_failure_attributions sfa JOIN sessions s ON s.session_id = sfa.session_id
+                WHERE s.experiment_id = :eid AND sfa.detected = true
                 GROUP BY 1, 2
                 """
             ),
             {"eid": experiment_id},
+        ).mappings().all()
+        source_rows = conn.execute(
+            text("SELECT DISTINCT failure_mode::text AS failure_mode, detector_source::text AS detector_source FROM session_failure_attributions")
         ).mappings().all()
     counts: dict[str, dict[str, int]] = {}
     n_v1 = int((base_df.agent_version == "v1").sum())
     n_v2 = int((base_df.agent_version == "v2").sum())
     for r in rows:
         counts.setdefault(r["failure_mode"], {})[r["agent_version"]] = r["n"]
+    sources = {r["failure_mode"]: r["detector_source"] for r in source_rows}
 
-    distribution = [
-        FailureModeDistributionItem(
+    # Prevalence, not an exclusive distribution: mechanisms can co-occur,
+    # so rate_v1/rate_v2 summed across items do not sum to 1.0.
+    prevalence = [
+        FailureMechanismPrevalenceItem(
             failure_mode=mode,
+            detector_source=sources.get(mode, "deterministic" if mode in DETERMINISTIC_MECHANISMS else "unknown"),
             count_v1=counts.get(mode, {}).get("v1", 0),
             count_v2=counts.get(mode, {}).get("v2", 0),
             rate_v1=(counts.get(mode, {}).get("v1", 0) / n_v1) if n_v1 else 0.0,
             rate_v2=(counts.get(mode, {}).get("v2", 0) / n_v2) if n_v2 else 0.0,
         )
-        for mode in FAILURE_TAXONOMY
+        for mode in FAILURE_MECHANISMS
     ]
 
     tool_use = ToolUseQualitySchema(
@@ -101,7 +101,7 @@ def get_ai_quality_summary(experiment_id: str) -> AIQualitySummaryResponse:
 
     return AIQualitySummaryResponse(
         experiment_id=experiment_id,
-        failure_mode_distribution=distribution,
+        failure_mechanism_prevalence=prevalence,
         tool_use_quality=tool_use,
         trajectory_patterns=traj_items,
         classifier_provenance=_classifier_provenance(),

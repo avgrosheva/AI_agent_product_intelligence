@@ -16,41 +16,26 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from backend.analytics.experiment_results import MetricResult
-from backend.analytics.stats.clustering import cluster_arrays
-from backend.investigation.thresholds import (
-    GUARDRAIL_COST_RATIO,
-    GUARDRAIL_LATENCY_P95_RATIO,
-    GUARDRAIL_TOOL_ERROR_ABS_INCREASE,
-)
+# Stage 2 (domain-agnostic core): GuardrailCheck/GuardrailReport/
+# evaluate_guardrails are now generic (backend.core.guardrails) —
+# re-exported here so existing `from backend.investigation.recommend
+# import GuardrailCheck, GuardrailReport` imports keep working.
+# check_guardrails() below is now a thin call into evaluate_guardrails()
+# with the commerce domain's three guardrail definitions
+# (backend.domains.commerce.guardrails) instead of three hand-written
+# checks — same columns, same thresholds, same output shape.
+from backend.core.guardrails import GuardrailCheck, GuardrailReport, evaluate_guardrails
+from backend.domains.commerce.guardrails import COMMERCE_GUARDRAILS
+from backend.domains.commerce.next_actions import NEXT_ACTION_TEMPLATES
 
-NEXT_ACTION_TEMPLATES = {
-    "unnecessary_clarification": "Cap or gate clarification when >=3 explicit constraints are already present; re-run offline evaluation; consider a limited rollout.",
-    "wrong_constraint_interpretation": "Audit the constraint-parsing logic for the affected segment; add targeted regression tests; re-run offline evaluation before further rollout.",
-    "wrong_tool_selection": "Review the tool-selection policy to reduce redundant tool calls in the affected segment; re-run offline evaluation.",
-    "retrieval_failure": "Investigate retrieval/catalog coverage for the affected segment; consider expanding fallback ranking logic.",
-    "poor_ranking": "Review ranking quality for the affected segment.",
-    "unsupported_product_claim": "Audit agent responses in the affected segment for unsupported claims; tighten grounding.",
-    "other": "Manually review a sample of sessions in the affected segment to characterize the regression before further rollout.",
-    "none": "Manually review a sample of sessions in the affected segment; no single dominant failure mode was identified.",
-}
-
-
-@dataclass
-class GuardrailCheck:
-    name: str
-    v1_value: float
-    v2_value: float
-    threshold_description: str
-    breached: bool
-
-
-@dataclass
-class GuardrailReport:
-    checks: list[GuardrailCheck]
-
-    @property
-    def any_breach(self) -> bool:
-        return any(c.breached for c in self.checks)
+__all__ = [
+    "GuardrailCheck",
+    "GuardrailReport",
+    "Recommendation",
+    "check_guardrails",
+    "synthesize_recommendation",
+    "NEXT_ACTION_TEMPLATES",
+]
 
 
 @dataclass
@@ -66,39 +51,7 @@ def check_guardrails(df: pd.DataFrame) -> GuardrailReport:
     """METRICS.md SS5. Every threshold is a fixed, documented constant —
     no test/p-value involved, matching METRICS.md's own definition of these
     as deterministic ratio-threshold guardrails."""
-    checks = []
-
-    p95_v1 = df.loc[df.agent_version == "v1", "total_latency_ms"].quantile(0.95)
-    p95_v2 = df.loc[df.agent_version == "v2", "total_latency_ms"].quantile(0.95)
-    checks.append(
-        GuardrailCheck(
-            "p95_latency", float(p95_v1), float(p95_v2),
-            f"v2 > v1 x {GUARDRAIL_LATENCY_P95_RATIO}", bool(p95_v2 > p95_v1 * GUARDRAIL_LATENCY_P95_RATIO),
-        )
-    )
-
-    tool_err = df.dropna(subset=["tool_error_rate_session"])
-    arrays = cluster_arrays(tool_err, "tool_error_rate_session") if len(tool_err) else {"v1": [], "v2": []}
-    err_v1 = float(pd.Series(arrays.get("v1", [0])).mean())
-    err_v2 = float(pd.Series(arrays.get("v2", [0])).mean())
-    checks.append(
-        GuardrailCheck(
-            "tool_error_rate", err_v1, err_v2,
-            f"v2 > v1 + {GUARDRAIL_TOOL_ERROR_ABS_INCREASE}", bool(err_v2 > err_v1 + GUARDRAIL_TOOL_ERROR_ABS_INCREASE),
-        )
-    )
-
-    cost_arrays = cluster_arrays(df, "total_cost_usd")
-    cost_v1 = float(pd.Series(cost_arrays.get("v1", [0])).mean())
-    cost_v2 = float(pd.Series(cost_arrays.get("v2", [0])).mean())
-    checks.append(
-        GuardrailCheck(
-            "cost_per_session", cost_v1, cost_v2,
-            f"v2 > v1 x {GUARDRAIL_COST_RATIO}", bool(cost_v2 > cost_v1 * GUARDRAIL_COST_RATIO),
-        )
-    )
-
-    return GuardrailReport(checks=checks)
+    return evaluate_guardrails(df, COMMERCE_GUARDRAILS)
 
 
 def synthesize_recommendation(

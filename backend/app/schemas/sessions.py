@@ -21,7 +21,7 @@ class SessionSummary(BaseModel):
     total_latency_ms: int
     total_cost_usd: float
     started_at: datetime
-    failure_mode: str | None = None
+    detected_failure_modes: list[str] = []
 
 
 class SessionListResponse(BaseModel):
@@ -86,10 +86,14 @@ class EvaluationSchema(BaseModel):
 
 
 class FailureClassificationSchema(BaseModel):
+    """One detected mechanism (hybrid multi-label redesign) — a session's
+    SessionDetailResponse carries a list of these, one per mechanism that
+    actually fired, not a single exclusive classification."""
+
     failure_mode: str
-    confidence: float
-    evidence_text: str
-    source: str
+    detector_source: str  # "deterministic" | "real_llm" | "mock_llm"
+    confidence: float | None
+    evidence_text: str | None
     provenance: ClassifierProvenance
 
 
@@ -118,4 +122,4 @@ class SessionDetailResponse(BaseModel):
     recommendations: list[RecommendationItemSchema]
     product_events: list[ProductEventSchema]
     evaluations: list[EvaluationSchema]
-    failure_classification: FailureClassificationSchema | None
+    failure_attributions: list[FailureClassificationSchema]

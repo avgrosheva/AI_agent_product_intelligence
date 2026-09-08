@@ -11,7 +11,18 @@ AI_EVALUATION.md, not by reading validation_ground_truth.parquet.
 
 from __future__ import annotations
 
-from backend.llm.client import FailureClassification, SessionContext
+from backend.llm.client import FailureClassification, MechanismResult, SemanticAttribution, SessionContext
+
+# Substring an agent message would use to state a use-case claim, matching
+# datagen's render_unsupported_claim_sentence templates ("great for
+# gaming", "well-suited for content creation", etc.) — observable text
+# matching, not a read of any hidden generator flag.
+_USE_CASE_PHRASES = {
+    "programming": "programming",
+    "gaming": "gaming",
+    "office": "office",
+    "content_creation": "content creation",
+}
 
 
 def _count_action(seq: tuple[str, ...], action_type: str) -> int:
@@ -23,7 +34,82 @@ def _has_consecutive(seq: tuple[str, ...], action_type: str) -> bool:
 
 
 class RuleBasedMockClient:
-    """Implements the LLMClient protocol without any network call."""
+    """Implements the LLMClient protocol without any network call.
+
+    classify_semantic is the current method, and covers only the three
+    SEMANTIC mechanisms (unnecessary_clarification,
+    wrong_constraint_interpretation, unsupported_product_claim) — the
+    three deterministic mechanisms (retrieval_failure, poor_ranking,
+    wrong_tool_selection) are never guessed by any LLM or mock, real or
+    fake; see backend.llm.deterministic_detectors, which both the real and
+    mock pipelines call for those. classify_failure (below) is the old
+    exclusive-classifier method, kept only for historical compatibility."""
+
+    def classify_semantic(self, context: SessionContext) -> SemanticAttribution:
+        results: list[MechanismResult] = []
+
+        has_clarify = "clarify" in context.action_sequence
+        if has_clarify and context.num_constraints >= 3:
+            confidence = 0.90 if context.num_constraints >= 4 else 0.78
+            results.append(
+                MechanismResult(
+                    "unnecessary_clarification",
+                    True,
+                    confidence,
+                    f"agent asked a clarifying question despite {context.num_constraints} stated constraints",
+                )
+            )
+        else:
+            results.append(
+                MechanismResult("unnecessary_clarification", False, 0.85, "no excess clarification observed")
+            )
+
+        if (
+            context.top_recommendation_satisfies_constraints is False
+            and context.num_constraints >= 1
+            and context.any_shown_recommendation_satisfies_constraints
+        ):
+            results.append(
+                MechanismResult(
+                    "wrong_constraint_interpretation",
+                    True,
+                    0.72,
+                    f"top recommendation did not satisfy all {context.num_constraints} stated constraints "
+                    f"for {context.requested_category}, even though another shown option did",
+                )
+            )
+        else:
+            results.append(
+                MechanismResult(
+                    "wrong_constraint_interpretation",
+                    False,
+                    0.80,
+                    "no constraint violation observed among a set that includes a compliant candidate",
+                )
+            )
+
+        top = context.recommended_products[0] if context.recommended_products else None
+        claim_detected = False
+        claim_evidence = "no product-attribute claim observed in the transcript"
+        if top is not None:
+            agent_texts = [text.lower() for sender, text in context.transcript if sender == "agent"]
+            for tag, phrase in _USE_CASE_PHRASES.items():
+                if tag in top.use_case_tags:
+                    continue
+                if any(phrase in text for text in agent_texts):
+                    claim_detected = True
+                    claim_evidence = (
+                        f"agent message references '{phrase}' but the recommended product's use_case_tags "
+                        f"do not include '{tag}'"
+                    )
+                    break
+        results.append(
+            MechanismResult(
+                "unsupported_product_claim", claim_detected, 0.70 if claim_detected else 0.75, claim_evidence
+            )
+        )
+
+        return SemanticAttribution(results=tuple(results))
 
     def classify_failure(self, context: SessionContext) -> FailureClassification:
         candidates: list[FailureClassification] = []

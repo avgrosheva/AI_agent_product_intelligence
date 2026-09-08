@@ -12,9 +12,15 @@ registry, which is covered by its own tests
 (tests/test_experiment_results.py, tests/test_investigation_segments.py).
 
 Single-dimension scan: every value of every pre-treatment dimension.
-Pairwise scan: only the curated allowlist below (INVESTIGATION.md SS1) —
-not the full combinatorial grid — to keep the test count bounded and every
+Pairwise scan: only the curated allowlist (INVESTIGATION.md SS1) — not the
+full combinatorial grid — to keep the test count bounded and every
 surfaced segment explainable in one sentence.
+
+DIMENSION_VALUES/PAIRWISE_ALLOWLIST (Stage 2: domain-agnostic core) are
+commerce domain data, imported from backend.domains.commerce.segments and
+re-exported here — this module's own code (build_segment_registry) is the
+generic mechanism; a non-shopping domain supplies its own dimension
+values/pairwise list instead of these, unchanged mechanism.
 """
 
 from __future__ import annotations
@@ -25,23 +31,9 @@ from typing import Callable
 import pandas as pd
 
 from backend.analytics import metric_registry
+from backend.domains.commerce.segments import DIMENSION_VALUES, PAIRWISE_ALLOWLIST
 
-DIMENSION_VALUES: dict[str, list[str]] = {
-    "requested_category": ["laptop", "monitor", "accessory"],
-    "constraint_count_bucket": ["0-1", "2", "3+"],
-    "platform": ["web", "ios", "android"],
-    "device_tier": ["low", "mid", "high"],
-    "locale": ["ru-RU", "en-US"],
-    "persona": ["budget", "mainstream", "power_user", "gift_buyer"],
-}
-
-# Pairwise allowlist (INVESTIGATION.md SS1) — curated, not the full grid.
-PAIRWISE_ALLOWLIST: list[tuple[str, str]] = [
-    ("constraint_count_bucket", "platform"),
-    ("constraint_count_bucket", "requested_category"),
-    ("platform", "device_tier"),
-    ("constraint_count_bucket", "persona"),
-]
+__all__ = ["DIMENSION_VALUES", "PAIRWISE_ALLOWLIST", "registered_pre_treatment_dimensions", "Segment", "build_segment_registry"]
 
 
 def registered_pre_treatment_dimensions() -> list[str]:

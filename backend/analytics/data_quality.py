@@ -60,7 +60,7 @@ def check_duplicate_ids(engine: Engine) -> list[CheckResult]:
         ("users", "user_id"), ("products", "product_id"), ("experiments", "experiment_id"),
         ("sessions", "session_id"), ("messages", "message_id"), ("agent_actions", "action_id"),
         ("tool_calls", "tool_call_id"), ("recommendations", "rec_id"), ("product_events", "event_id"),
-        ("evaluations", "eval_id"), ("failure_labels", "label_id"),
+        ("evaluations", "eval_id"), ("session_failure_attributions", "attribution_id"),
     ]
     results = []
     for table, pk in tables_and_pks:

@@ -21,37 +21,19 @@ from backend.analytics.stats.bootstrap import cluster_bootstrap_ci
 from backend.analytics.stats.clustering import assert_single_version_per_user, cluster_arrays
 from backend.analytics.stats.continuous import mann_whitney_u, welch_t_test
 from backend.analytics.stats.effect_size import cohens_d_average_variance, rank_biserial_from_u
+# Stage 2 (domain-agnostic core): this binding from metric name to
+# session-level column is commerce domain data, not generic logic — lives
+# in backend.domains.commerce.metrics and is re-exported here under the
+# same name so existing `from backend.analytics.experiment_results import
+# METRIC_VALUE_COLUMNS` imports keep working. A non-shopping domain
+# supplies its own mapping; analyze_metric() below (the generic mechanism)
+# does not change.
+from backend.domains.commerce.metrics import METRIC_VALUE_COLUMNS
 
 MIN_USERS_FOR_TEST = 10          # below this: "insufficient evidence", no verdict at all
 MIN_USERS_FOR_CLT = 30           # below this (but >= MIN_USERS_FOR_TEST): usable, flagged "small sample"
 MIN_EVENTS_FOR_RATE = 10         # STATISTICS.md SS5: need >=10 events AND >=10 non-events, pooled
 ALPHA = 0.05
-
-# metric_name -> (value_column, eligibility_mask_fn | None)
-# eligibility_mask_fn(df) -> boolean Series; None means "all rows".
-METRIC_VALUE_COLUMNS: dict[str, tuple[str, object]] = {
-    "conversion_rate": ("converted", None),
-    "add_to_cart_rate": ("added_to_cart", None),
-    "abandonment_rate": ("abandoned", None),
-    "impression_to_click_rate": ("had_click", lambda df: df.had_impression == 1),
-    "click_to_cart_rate": ("had_cart", lambda df: df.had_click == 1),
-    "cart_to_purchase_rate": ("had_purchase", lambda df: df.had_cart == 1),
-    "time_to_first_recommendation_ms": ("time_to_first_recommendation_ms", lambda df: df.time_to_first_recommendation_ms.notna()),
-    "time_to_goal_seconds": ("time_to_goal_seconds", lambda df: df.time_to_goal_seconds.notna()),
-    "turns_per_session": ("num_turns", None),
-    "clarification_rate": ("has_clarify", None),
-    "unnecessary_clarification_rate": ("has_clarify", lambda df: df.num_constraints >= 3),
-    "tool_calls_per_session": ("n_tool_calls", None),
-    "tool_success_rate": ("tool_success_rate_session", lambda df: df.tool_success_rate_session.notna()),
-    "tool_error_rate": ("tool_error_rate_session", lambda df: df.tool_error_rate_session.notna()),
-    "dead_end_rate": ("is_dead_end", None),
-    "action_sequence_length": ("n_actions", None),
-    "offline_task_success_rate": ("offline_task_success_ge_0_7", lambda df: df.offline_task_success_score.notna()),
-    "constraint_satisfaction_rate": ("constraint_satisfaction_score", lambda df: df.constraint_satisfaction_score.notna()),
-    "cost_per_session_usd": ("total_cost_usd", None),
-    "revenue_per_session_usd": ("revenue_usd", None),
-    "gross_margin_proxy_usd": ("margin_proxy_usd", None),
-}
 
 
 @dataclass
@@ -91,9 +73,18 @@ def analyze_metric(
     metric,  # backend.analytics.metric_registry.MetricDefinition
     segment_label: str = "all sessions",
     segment_mask: pd.Series | None = None,
+    metric_value_columns: dict[str, tuple[str, object]] | None = None,
 ) -> MetricResult:
-    """`df` is the session_level_base.sql output (or a segment of it)."""
-    value_col, eligibility_fn = METRIC_VALUE_COLUMNS[metric.name]
+    """`df` is session_level_base.sql's output (or a segment of it) for the
+    commerce domain, or any DomainAdapter.analytics_base_df() output for
+    another domain. `metric_value_columns` defaults to the commerce
+    binding (METRIC_VALUE_COLUMNS, module-level, unchanged for every
+    existing call site) — pass a domain adapter's own
+    metric_value_columns() to compute one of ITS metrics instead (Stage 3:
+    this is what makes analyze_metric genuinely domain-pluggable, not just
+    domain-agnostic in the abstract)."""
+    columns = metric_value_columns if metric_value_columns is not None else METRIC_VALUE_COLUMNS
+    value_col, eligibility_fn = columns[metric.name]
 
     scoped = _apply_segment(df, segment_mask)
     eligible = scoped[eligibility_fn(scoped)] if eligibility_fn is not None else scoped

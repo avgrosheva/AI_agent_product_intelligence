@@ -63,6 +63,17 @@ _NO_MATCH_INTROS = [
     "Nothing fits every requirement exactly, but this one comes close:",
 ]
 
+# Appended to a recommend intro to simulate a real unsupported_product_claim
+# mechanism (multi-label attribution redesign, DATA_MODEL.md SS6 addendum):
+# asserts the recommended product is good for a use case that is NOT in its
+# own use_case_tags — a claim genuinely unsupported by observable product
+# data, not a relabeled "none" session.
+_UNSUPPORTED_CLAIM_SENTENCES = [
+    "It's also great for {tag}.",
+    "This one works really well for {tag} too.",
+    "A nice bonus: it's well-suited for {tag}.",
+]
+
 
 def render_opener(rng: np.random.Generator, category: str, constraints: dict) -> str:
     noun = _CATEGORY_NOUN[category]
@@ -87,3 +98,8 @@ def render_clarify_response(rng: np.random.Generator, budget: int, use_case: str
 def render_recommend_intro(rng: np.random.Generator, has_full_match: bool) -> str:
     pool = _RECOMMEND_INTROS if has_full_match else _NO_MATCH_INTROS
     return str(weighted_choice(rng, pool, [1.0] * len(pool)))
+
+
+def render_unsupported_claim_sentence(rng: np.random.Generator, false_tag: str) -> str:
+    template = weighted_choice(rng, _UNSUPPORTED_CLAIM_SENTENCES, [1.0] * len(_UNSUPPORTED_CLAIM_SENTENCES))
+    return str(template).format(tag=false_tag.replace("_", " "))

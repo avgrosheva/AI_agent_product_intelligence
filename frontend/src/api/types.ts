@@ -35,12 +35,16 @@ export interface MetricResult {
   notes: string[]
 }
 
-export type ClassifierType = 'rule_based_mock' | 'anthropic' | 'unknown' | 'not_classified'
+export type ClassifierType = 'rule_based_mock' | 'real_llm' | 'unknown' | 'not_classified'
 export type EvaluationStatus = 'evaluated_current' | 'evaluated_stale' | 'not_evaluated' | 'not_classified'
 
 export interface ClassifierProvenance {
   classifier_type: ClassifierType
   classifier_version: string | null
+  // Populated only when classifier_type === 'real_llm' (e.g. provider
+  // "openrouter", model "anthropic/claude-sonnet-5"); null for the mock.
+  provider: string | null
+  model: string | null
   is_mock: boolean
   evaluation_status: EvaluationStatus
   run_at: string | null
@@ -216,7 +220,7 @@ export interface SessionSummary {
   total_latency_ms: number
   total_cost_usd: number
   started_at: string
-  failure_mode: string | null
+  detected_failure_modes: string[]
 }
 
 export interface SessionListResponse {
@@ -274,9 +278,9 @@ export interface EvaluationItem {
 
 export interface FailureClassification {
   failure_mode: string
-  confidence: number
-  evidence_text: string
-  source: string
+  detector_source: string // "deterministic" | "real_llm" | "mock_llm"
+  confidence: number | null
+  evidence_text: string | null
   provenance: ClassifierProvenance
 }
 
@@ -304,13 +308,14 @@ export interface SessionDetail {
   recommendations: RecommendationItem[]
   product_events: ProductEvent[]
   evaluations: EvaluationItem[]
-  failure_classification: FailureClassification | null
+  failure_attributions: FailureClassification[]
 }
 
 // ---- AI Quality ----
 
-export interface FailureModeDistributionItem {
+export interface FailureMechanismPrevalenceItem {
   failure_mode: string
+  detector_source: string // "deterministic" | "real_llm" | "mock_llm"
   count_v1: number
   count_v2: number
   rate_v1: number
@@ -365,7 +370,7 @@ export interface ClassifierEvaluationResponse {
 
 export interface AIQualitySummaryResponse {
   experiment_id: string
-  failure_mode_distribution: FailureModeDistributionItem[]
+  failure_mechanism_prevalence: FailureMechanismPrevalenceItem[]
   tool_use_quality: ToolUseQuality
   trajectory_patterns: TrajectoryPatternFrequency[]
   classifier_provenance: ClassifierProvenance

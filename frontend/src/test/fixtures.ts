@@ -174,9 +174,9 @@ export function investigationFixture(lens: 'abandonment' | 'conversion' | 'const
 
 export const AI_QUALITY_FIXTURE: AIQualitySummaryResponse = {
   experiment_id: EXPERIMENT_ID,
-  failure_mode_distribution: [
-    { failure_mode: 'unnecessary_clarification', count_v1: 100, count_v2: 400, rate_v1: 0.02, rate_v2: 0.09 },
-    { failure_mode: 'none', count_v1: 4000, count_v2: 3800, rate_v1: 0.88, rate_v2: 0.85 },
+  failure_mechanism_prevalence: [
+    { failure_mode: 'unnecessary_clarification', detector_source: 'mock_llm', count_v1: 100, count_v2: 400, rate_v1: 0.02, rate_v2: 0.09 },
+    { failure_mode: 'retrieval_failure', detector_source: 'deterministic', count_v1: 300, count_v2: 250, rate_v1: 0.06, rate_v2: 0.05 },
   ],
   tool_use_quality: {
     tool_calls_per_session_v1: 1.89, tool_calls_per_session_v2: 1.85,
@@ -189,6 +189,8 @@ export const AI_QUALITY_FIXTURE: AIQualitySummaryResponse = {
   classifier_provenance: {
     classifier_type: 'rule_based_mock',
     classifier_version: 'rule_based_mock-v1',
+    provider: null,
+    model: null,
     is_mock: true,
     evaluation_status: 'evaluated_current',
     run_at: '2024-02-01T00:00:00Z',
@@ -216,7 +218,7 @@ export const SESSION_LIST_FIXTURE: SessionListResponse = {
       session_id: 'sess-0001-aaaa-bbbb-cccc-000000000001',
       agent_version: 'v2', requested_category: 'monitor', constraint_count_bucket: '3+', platform: 'android',
       device_tier: 'mid', locale: 'en-US', persona: 'mainstream', outcome: 'abandoned', num_turns: 4,
-      total_latency_ms: 3200, total_cost_usd: 0.0061, started_at: '2024-01-15T10:00:00Z', failure_mode: 'unnecessary_clarification',
+      total_latency_ms: 3200, total_cost_usd: 0.0061, started_at: '2024-01-15T10:00:00Z', detected_failure_modes: ['unnecessary_clarification'],
     },
   ],
   total: 1, limit: 25, offset: 0, filters_applied: { constraint_count_bucket: '3+' },
@@ -265,9 +267,11 @@ export const SESSION_DETAIL_FIXTURE: SessionDetail = {
   evaluations: [
     { eval_type: 'offline_task_success', score: 0, evaluator: 'deterministic_rule' },
   ],
-  failure_classification: {
-    failure_mode: 'unnecessary_clarification', confidence: 0.9, evidence_text: 'Agent asked a clarifying question despite sufficient constraints.',
-    source: 'llm_classifier',
-    provenance: AI_QUALITY_FIXTURE.classifier_provenance,
-  },
+  failure_attributions: [
+    {
+      failure_mode: 'unnecessary_clarification', detector_source: 'mock_llm', confidence: 0.9,
+      evidence_text: 'Agent asked a clarifying question despite sufficient constraints.',
+      provenance: AI_QUALITY_FIXTURE.classifier_provenance,
+    },
+  ],
 }

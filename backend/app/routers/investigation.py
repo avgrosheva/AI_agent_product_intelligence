@@ -15,7 +15,7 @@ from functools import lru_cache
 
 from fastapi import APIRouter, Query
 
-from backend.app.dependencies import get_agent_actions_df, get_base_df, get_experiment_or_404, get_failure_labels_df
+from backend.app.dependencies import get_agent_actions_df, get_base_df, get_experiment_or_404, get_failure_attributions_wide_df
 from backend.app.routers.experiments import _to_schema
 from backend.app.schemas.experiments import GuardrailCheckSchema
 from backend.app.schemas.investigation import (
@@ -87,9 +87,9 @@ def _run_investigation_cached(experiment_id: str, lens: InvestigationLens):
     byte-identical output across repeated runs on the same data)."""
     base_df = get_base_df(experiment_id=experiment_id)
     actions_df = get_agent_actions_df()
-    labels_df = get_failure_labels_df()
+    attributions_wide_df = get_failure_attributions_wide_df()
     lens_meta = LENS_METADATA[lens]
-    return run_investigation(base_df, actions_df, labels_df, primary_metric_name=lens_meta["metric_name"])
+    return run_investigation(base_df, actions_df, attributions_wide_df, primary_metric_name=lens_meta["metric_name"])
 
 
 @router.get("/experiments/{experiment_id}/investigation", response_model=InvestigationResponse)

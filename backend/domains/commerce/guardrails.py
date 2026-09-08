@@ -1,0 +1,39 @@
+"""The commerce domain's three registered guardrails (METRICS.md SS5).
+Thresholds are unchanged from backend/investigation/thresholds.py — this
+module only turns the three previously hand-written checks in
+backend.investigation.recommend.check_guardrails into declarative data,
+evaluated by the generic backend.core.guardrails.evaluate_guardrails."""
+
+from __future__ import annotations
+
+from backend.core.guardrails import GuardrailDefinition
+from backend.investigation.thresholds import (
+    GUARDRAIL_COST_RATIO,
+    GUARDRAIL_LATENCY_P95_RATIO,
+    GUARDRAIL_TOOL_ERROR_ABS_INCREASE,
+)
+
+COMMERCE_GUARDRAILS: list[GuardrailDefinition] = [
+    GuardrailDefinition(
+        name="p95_latency",
+        column="total_latency_ms",
+        aggregation="p95_raw",
+        comparison="ratio",
+        threshold=GUARDRAIL_LATENCY_P95_RATIO,
+    ),
+    GuardrailDefinition(
+        name="tool_error_rate",
+        column="tool_error_rate_session",
+        aggregation="cluster_mean",
+        comparison="absolute_increase",
+        threshold=GUARDRAIL_TOOL_ERROR_ABS_INCREASE,
+        dropna=True,
+    ),
+    GuardrailDefinition(
+        name="cost_per_session",
+        column="total_cost_usd",
+        aggregation="cluster_mean",
+        comparison="ratio",
+        threshold=GUARDRAIL_COST_RATIO,
+    ),
+]

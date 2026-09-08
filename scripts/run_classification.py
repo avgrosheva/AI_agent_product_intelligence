@@ -1,9 +1,12 @@
-"""Run failure classification over the loaded dataset and populate
-failure_labels. Default client is the deterministic RuleBasedMockClient —
-no API key required. Pass --client anthropic for the real LLM path
-(requires ANTHROPIC_API_KEY and `pip install -e ".[llm]"`).
+"""Run the current hybrid multi-label attribution pipeline over the loaded
+dataset and populate session_failure_attributions (deterministic detectors
++ one semantic LLM call per session — see AI_EVALUATION.md SS2-3). Default
+client is the deterministic RuleBasedMockClient — no API key required.
+Pass --client openrouter for the real LLM path (requires OPENROUTER_API_KEY
+and `pip install -e ".[llm]"`; model is configurable via OPENROUTER_MODEL,
+see backend/llm/openrouter_client.py).
 
-Usage: python -m scripts.run_classification [--client mock|anthropic]
+Usage: python -m scripts.run_classification [--client mock|openrouter]
 """
 
 from __future__ import annotations
@@ -20,15 +23,15 @@ from backend.llm.mock_client import RuleBasedMockClient
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--client", choices=["mock", "anthropic"], default="mock")
+    parser.add_argument("--client", choices=["mock", "openrouter"], default="mock")
     args = parser.parse_args()
 
     if args.client == "mock":
         client = RuleBasedMockClient()
     else:
-        from backend.llm.anthropic_client import AnthropicLLMClient
+        from backend.llm.openrouter_client import OpenRouterLLMClient
 
-        client = AnthropicLLMClient()
+        client = OpenRouterLLMClient()
 
     engine = create_engine(get_database_url())
     t0 = time.time()

@@ -28,7 +28,7 @@ from backend.app.schemas.sessions import (
     SessionSummary,
     ToolCallSchema,
 )
-from backend.llm.provenance import get_evaluation_status, read_classifier_metadata
+from backend.llm.provenance import current_classifier_provenance_fields, get_evaluation_status
 
 router = APIRouter(tags=["sessions"])
 
@@ -63,7 +63,8 @@ def list_sessions(
     if failure_mode is not None:
         with get_engine().connect() as conn:
             labeled = conn.execute(
-                text("SELECT session_id FROM failure_labels WHERE failure_mode = :fm"), {"fm": failure_mode}
+                text("SELECT session_id FROM session_failure_attributions WHERE failure_mode = :fm AND detected = true"),
+                {"fm": failure_mode},
             ).scalars().all()
         labeled_ids = {str(x) for x in labeled}
         df = df[df["session_id"].astype(str).isin(labeled_ids)]
@@ -72,14 +73,18 @@ def list_sessions(
     total = len(df)
     page = df.sort_values("started_at", ascending=False).iloc[offset : offset + limit]
 
-    failure_by_session = {}
+    failure_by_session: dict[str, list[str]] = {}
     if len(page):
         with get_engine().connect() as conn:
             rows = conn.execute(
-                text("SELECT session_id, failure_mode::text AS failure_mode FROM failure_labels WHERE session_id = ANY(:ids)"),
+                text(
+                    "SELECT session_id, failure_mode::text AS failure_mode FROM session_failure_attributions "
+                    "WHERE session_id = ANY(:ids) AND detected = true"
+                ),
                 {"ids": [uuid.UUID(str(x)) for x in page["session_id"]]},
             ).mappings().all()
-        failure_by_session = {str(r["session_id"]): r["failure_mode"] for r in rows}
+        for r in rows:
+            failure_by_session.setdefault(str(r["session_id"]), []).append(r["failure_mode"])
 
     items = [
         SessionSummary(
@@ -96,7 +101,7 @@ def list_sessions(
             total_latency_ms=row.total_latency_ms,
             total_cost_usd=row.total_cost_usd,
             started_at=row.started_at,
-            failure_mode=failure_by_session.get(str(row.session_id)),
+            detected_failure_modes=failure_by_session.get(str(row.session_id), []),
         )
         for row in page.itertuples()
     ]
@@ -104,14 +109,7 @@ def list_sessions(
 
 
 def _classifier_provenance() -> ClassifierProvenance:
-    meta = read_classifier_metadata()
-    status = get_evaluation_status()
-    if meta is None:
-        return ClassifierProvenance(classifier_type="not_classified", is_mock=False, evaluation_status=status)
-    return ClassifierProvenance(
-        classifier_type=meta.classifier_type, classifier_version=meta.classifier_version,
-        is_mock=meta.is_mock, evaluation_status=status, run_at=meta.run_at,
-    )
+    return ClassifierProvenance(evaluation_status=get_evaluation_status(), **current_classifier_provenance_fields())
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
@@ -180,20 +178,26 @@ def get_session_detail(session_id: str) -> SessionDetailResponse:
             text("SELECT eval_type::text AS eval_type, score, evaluator::text AS evaluator FROM evaluations WHERE session_id = :sid"),
             {"sid": sid},
         ).mappings().all()
-        failure_label = conn.execute(
-            text("SELECT failure_mode::text AS failure_mode, confidence, evidence_text, source::text AS source FROM failure_labels WHERE session_id = :sid"),
+        attribution_rows = conn.execute(
+            text(
+                "SELECT failure_mode::text AS failure_mode, detector_source::text AS detector_source, "
+                "confidence, evidence_text FROM session_failure_attributions "
+                "WHERE session_id = :sid AND detected = true"
+            ),
             {"sid": sid},
-        ).mappings().first()
+        ).mappings().all()
 
     provenance = _classifier_provenance()
-    failure_classification = (
+    failure_attributions = [
         FailureClassificationSchema(
-            failure_mode=failure_label["failure_mode"], confidence=failure_label["confidence"],
-            evidence_text=failure_label["evidence_text"], source=failure_label["source"], provenance=provenance,
+            failure_mode=r["failure_mode"],
+            detector_source=r["detector_source"],
+            confidence=r["confidence"],
+            evidence_text=r["evidence_text"],
+            provenance=provenance,
         )
-        if failure_label is not None
-        else None
-    )
+        for r in attribution_rows
+    ]
 
     return SessionDetailResponse(
         session_id=str(session_row["session_id"]),
@@ -225,5 +229,5 @@ def get_session_detail(session_id: str) -> SessionDetailResponse:
         ],
         product_events=[ProductEventSchema(**dict(e)) for e in events],
         evaluations=[EvaluationSchema(**dict(e)) for e in evaluations],
-        failure_classification=failure_classification,
+        failure_attributions=failure_attributions,
     )

@@ -131,6 +131,37 @@ class FailureLabelSource(str, Enum):
 
     Ground-truth failure labels never populate the app's failure_labels
     table; they exist only in validation_ground_truth.parquet.
+
+    Deprecated: failure_labels/FailureMode/FailureLabelSource are the old
+    exclusive-classifier schema, superseded by session_failure_attributions/
+    FailureMechanism/DetectorSource (the hybrid multi-label attribution
+    redesign). Kept only for historical rows already written under Stage 3;
+    nothing in the app writes to failure_labels going forward.
     """
 
     llm_classifier = "llm_classifier"
+
+
+class FailureMechanism(str, Enum):
+    """The six independently-detected failure mechanisms in the hybrid
+    multi-label attribution architecture — three deterministic (recovered
+    from structured telemetry, never guessed by an LLM) and three semantic
+    (require interpreting conversation context, handled by the LLM).
+    Deliberately excludes "none" (derived: no mechanism fired for a
+    session, never itself a stored/predicted row) and "other" (deprecated,
+    see FailureMode — not part of this taxonomy at all)."""
+
+    # deterministic
+    retrieval_failure = "retrieval_failure"
+    poor_ranking = "poor_ranking"
+    wrong_tool_selection = "wrong_tool_selection"
+    # semantic (LLM)
+    unnecessary_clarification = "unnecessary_clarification"
+    wrong_constraint_interpretation = "wrong_constraint_interpretation"
+    unsupported_product_claim = "unsupported_product_claim"
+
+
+class DetectorSource(str, Enum):
+    deterministic = "deterministic"
+    real_llm = "real_llm"
+    mock_llm = "mock_llm"

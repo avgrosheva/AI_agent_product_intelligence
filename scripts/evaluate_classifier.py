@@ -1,8 +1,22 @@
-"""Offline evaluation of the failure classifier against planted ground
-truth (AI_EVALUATION.md SS5; Stage 2 review requirement #9 — mandatory).
+"""DEPRECATED / LEGACY — targets the old exclusive 8-class classifier and
+the old `failure_labels` table, both superseded by the hybrid multi-label
+attribution redesign (`session_failure_attributions`, deterministic
+detectors + one semantic LLM call — see AI_EVALUATION.md SS2-3). Nothing
+in the current pipeline writes to `failure_labels` anymore, so running
+this script against a freshly-classified database returns empty
+predictions. Kept only so historical failure_labels-shaped data can still
+be evaluated the same way it always was. Do NOT use this to evaluate the
+current classifier — see scripts/run_hybrid_benchmark.py instead, which
+scores the current deterministic detectors and semantic LLM call against
+the current independent multi-label ground truth (`truth_*` columns).
 
-This is the ONLY script, besides tests/validate_ground_truth.py, permitted
-to read validation_ground_truth.parquet. It reads the app's failure_labels
+Offline evaluation of the OLD exclusive classifier against planted ground
+truth (AI_EVALUATION.md SS5 history; Stage 2 review requirement #9 —
+mandatory AT THE TIME, superseded by the redesign's own evaluation).
+
+This is one of the few scripts (besides tests/validate_ground_truth.py and
+scripts/run_hybrid_benchmark.py) permitted to read
+validation_ground_truth.parquet. It reads the app's failure_labels
 (classifier predictions, source='llm_classifier') and the validation
 artifact (ground truth, source of truth for this evaluation only) and
 joins them in this process — never inside backend/investigation or
