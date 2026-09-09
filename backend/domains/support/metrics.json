@@ -1,0 +1,73 @@
+{
+  "metrics": [
+    {
+      "name": "resolution_rate",
+      "label": "Resolution Rate",
+      "type": "rate",
+      "direction": "higher_is_better",
+      "semantic_class": "outcome",
+      "source_tables": ["ingested_sessions"],
+      "inference_unit": "user",
+      "numerator": "count(sessions where outcome_label='resolved')",
+      "denominator": "count(sessions)",
+      "value_column": "resolved",
+      "eligibility": null,
+      "notes": "Support domain's north-star metric — the equivalent role commerce's conversion_rate plays."
+    },
+    {
+      "name": "escalation_rate",
+      "label": "Escalation Rate",
+      "type": "rate",
+      "direction": "lower_is_better",
+      "semantic_class": "outcome",
+      "source_tables": ["ingested_sessions"],
+      "inference_unit": "user",
+      "numerator": "count(sessions where outcome_label='escalated')",
+      "denominator": "count(sessions)",
+      "value_column": "escalated",
+      "eligibility": null
+    },
+    {
+      "name": "csat_score",
+      "label": "CSAT Score",
+      "type": "continuous",
+      "direction": "higher_is_better",
+      "semantic_class": "outcome",
+      "source_tables": ["ingested_metrics"],
+      "inference_unit": "user",
+      "numerator": "mean(ingested_metrics.value where name='csat_score')",
+      "denominator": "n/a (continuous mean)",
+      "value_column": "csat_score",
+      "eligibility": {"kind": "not_null", "column": "csat_score"}
+    },
+    {
+      "name": "handle_time_seconds",
+      "label": "Handle Time",
+      "type": "continuous",
+      "direction": "lower_is_better",
+      "semantic_class": "post_treatment_mechanism",
+      "source_tables": ["ingested_metrics"],
+      "inference_unit": "user",
+      "numerator": "mean(ingested_metrics.value where name='handle_time_seconds')",
+      "denominator": "n/a (continuous mean)",
+      "value_column": "handle_time_seconds",
+      "eligibility": {"kind": "not_null", "column": "handle_time_seconds"}
+    },
+    {
+      "name": "ticket_category",
+      "label": "Ticket Category",
+      "type": "ratio",
+      "direction": "higher_is_better",
+      "semantic_class": "pre_treatment",
+      "source_tables": ["ingested_sessions"],
+      "inference_unit": "n/a (dimension, not a metric)",
+      "numerator": "n/a",
+      "denominator": "n/a",
+      "is_descriptive": true,
+      "is_inferential": false,
+      "cluster_stat_shape": null,
+      "value_column": null,
+      "notes": "Fixed at ticket intake, before any agent action — eligible to define a segment (Stage 4 task 5's non-commerce segment-scan proof)."
+    }
+  ]
+}

@@ -15,7 +15,10 @@ from sqlalchemy import create_engine, text
 
 from backend.analytics.sql_runner import run_sql_file
 from backend.app.db import get_database_url
+from backend.domains.commerce.investigation_config import commerce_investigation_config
 from backend.investigation.pipeline import run_investigation
+
+_COMMERCE_CONFIG = commerce_investigation_config()
 
 pd.set_option("display.width", 220)
 pd.set_option("display.max_columns", 30)
@@ -73,17 +76,17 @@ def main() -> None:
     timings["load_data"] = time.time() - t0
 
     t0 = time.time()
-    result_abandonment = run_investigation(base_df, actions, labels, primary_metric_name="abandonment_rate")
+    result_abandonment = run_investigation(base_df, actions, labels, _COMMERCE_CONFIG, primary_metric_name="abandonment_rate")
     timings["investigation_abandonment_rate"] = time.time() - t0
     print_investigation_result(result_abandonment, "secondary lens, where the actual regression lives per Stage 2")
 
     t0 = time.time()
-    result_conversion = run_investigation(base_df, actions, labels, primary_metric_name="conversion_rate")
+    result_conversion = run_investigation(base_df, actions, labels, _COMMERCE_CONFIG, primary_metric_name="conversion_rate")
     timings["investigation_conversion_rate"] = time.time() - t0
     print_investigation_result(result_conversion, "primary metric per INVESTIGATION.md default")
 
     t0 = time.time()
-    result_satisfaction = run_investigation(base_df, actions, labels, primary_metric_name="constraint_satisfaction_rate")
+    result_satisfaction = run_investigation(base_df, actions, labels, _COMMERCE_CONFIG, primary_metric_name="constraint_satisfaction_rate")
     timings["investigation_constraint_satisfaction_rate"] = time.time() - t0
     print_investigation_result(result_satisfaction, "AI-quality lens, catches monitor/exploratory effects directionally")
 

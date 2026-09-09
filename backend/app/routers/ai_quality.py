@@ -22,6 +22,7 @@ from backend.app.schemas.common import ClassifierProvenance
 from backend.investigation.trajectory_attribution import canonicalize_patterns, reconstruct_trajectories
 from backend.llm.client import DETERMINISTIC_MECHANISMS, FAILURE_MECHANISMS
 from backend.llm.provenance import current_classifier_provenance_fields, get_evaluation_status, read_evaluation_summary
+from backend.review.service import count_reviews_by_mechanism
 
 router = APIRouter(tags=["ai-quality"])
 
@@ -56,6 +57,7 @@ def get_ai_quality_summary(experiment_id: str) -> AIQualitySummaryResponse:
     for r in rows:
         counts.setdefault(r["failure_mode"], {})[r["agent_version"]] = r["n"]
     sources = {r["failure_mode"]: r["detector_source"] for r in source_rows}
+    review_counts = count_reviews_by_mechanism(get_engine(), "commerce", set(base_df["session_id"].astype(str)))
 
     # Prevalence, not an exclusive distribution: mechanisms can co-occur,
     # so rate_v1/rate_v2 summed across items do not sum to 1.0.
@@ -67,6 +69,9 @@ def get_ai_quality_summary(experiment_id: str) -> AIQualitySummaryResponse:
             count_v2=counts.get(mode, {}).get("v2", 0),
             rate_v1=(counts.get(mode, {}).get("v1", 0) / n_v1) if n_v1 else 0.0,
             rate_v2=(counts.get(mode, {}).get("v2", 0) / n_v2) if n_v2 else 0.0,
+            reviewed_count=review_counts.get(mode, {}).get("reviewed", 0),
+            confirmed_count=review_counts.get(mode, {}).get("confirmed", 0),
+            rejected_count=review_counts.get(mode, {}).get("rejected", 0),
         )
         for mode in FAILURE_MECHANISMS
     ]

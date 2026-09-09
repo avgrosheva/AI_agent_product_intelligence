@@ -54,10 +54,12 @@ def test_support_domain_has_no_registered_mechanisms(db_engine):
 def test_support_domain_end_to_end_ingest_compare_guardrail(api_client, db_engine):
     # SupportAdapter.domain is the fixed string "support" (analytics_base_df
     # filters ingested_sessions by it) — the payload must be ingested under
-    # that same domain. This is safe against cross-test collisions because
-    # tests run against the isolated per-session test database (Stage 1's
-    # test/demo DB isolation fix), never the demo database a real "support"
-    # fixture might also use.
+    # that same domain. Tests run against the isolated per-session test
+    # database (Stage 1's test/demo DB isolation fix), never the real demo
+    # database — but Stage 5 added more domain="support" tests in the same
+    # suite, so this test can no longer assume domain-wide exclusivity and
+    # must scope to its own experiment (adapter.list_experiments(), added
+    # Stage 5) like every other support-domain test now does.
     domain = SupportAdapter.domain
     resp = api_client.post("/api/v1/ingest/sessions", json=_support_payload(domain))
     assert resp.status_code == 201
@@ -68,12 +70,8 @@ def test_support_domain_end_to_end_ingest_compare_guardrail(api_client, db_engin
     from backend.app.db import get_database_url
 
     adapter = SupportAdapter(create_engine(get_database_url()))
-    base_df = adapter.analytics_base_df()
-    # No further scoping needed: this test runs against the isolated
-    # per-session test database (Stage 1's test/demo DB isolation fix),
-    # and this is the only test in the suite that ingests domain="support"
-    # data, so every row in ingested_sessions for this domain is this
-    # test's own.
+    exp = next(e for e in adapter.list_experiments() if e.name == "Support Test")
+    base_df = adapter.analytics_base_df(experiment_id=exp.experiment_id)
     assert len(base_df) == 24
 
     resolution_metric = next(m for m in adapter.metric_definitions() if m.name == "resolution_rate")

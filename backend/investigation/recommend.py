@@ -13,28 +13,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import pandas as pd
-
 from backend.analytics.experiment_results import MetricResult
-# Stage 2 (domain-agnostic core): GuardrailCheck/GuardrailReport/
-# evaluate_guardrails are now generic (backend.core.guardrails) —
-# re-exported here so existing `from backend.investigation.recommend
-# import GuardrailCheck, GuardrailReport` imports keep working.
-# check_guardrails() below is now a thin call into evaluate_guardrails()
-# with the commerce domain's three guardrail definitions
-# (backend.domains.commerce.guardrails) instead of three hand-written
-# checks — same columns, same thresholds, same output shape.
-from backend.core.guardrails import GuardrailCheck, GuardrailReport, evaluate_guardrails
-from backend.domains.commerce.guardrails import COMMERCE_GUARDRAILS
-from backend.domains.commerce.next_actions import NEXT_ACTION_TEMPLATES
+# Stage 2 (domain-agnostic core): GuardrailCheck/GuardrailReport are
+# generic (backend.core.guardrails) — re-exported here so existing
+# `from backend.investigation.recommend import GuardrailCheck,
+# GuardrailReport` imports keep working.
+# Stage 4: this module no longer imports or defaults to any commerce data
+# (no COMMERCE_GUARDRAILS, no commerce NEXT_ACTION_TEMPLATES) — the caller
+# (backend.investigation.pipeline.run_investigation) passes its own
+# guardrail list and next_action_templates, sourced from the active
+# domain's InvestigationConfig. A domain that registers no next-action
+# templates of its own falls back to backend.core.next_actions'
+# GENERIC_NEXT_ACTION_TEMPLATES.
+from backend.core.guardrails import GuardrailCheck, GuardrailReport
+from backend.core.next_actions import GENERIC_NEXT_ACTION_TEMPLATES
 
 __all__ = [
     "GuardrailCheck",
     "GuardrailReport",
     "Recommendation",
-    "check_guardrails",
     "synthesize_recommendation",
-    "NEXT_ACTION_TEMPLATES",
 ]
 
 
@@ -47,17 +45,11 @@ class Recommendation:
     rules_applied: list[str] = field(default_factory=list)
 
 
-def check_guardrails(df: pd.DataFrame) -> GuardrailReport:
-    """METRICS.md SS5. Every threshold is a fixed, documented constant —
-    no test/p-value involved, matching METRICS.md's own definition of these
-    as deterministic ratio-threshold guardrails."""
-    return evaluate_guardrails(df, COMMERCE_GUARDRAILS)
-
-
 def synthesize_recommendation(
     north_star_result: MetricResult,
     findings: list,  # list[backend.investigation.pipeline.Finding], typed loosely to avoid a circular import
     guardrails: GuardrailReport,
+    next_action_templates: dict[str, str] | None = None,
 ) -> Recommendation:
     """INVESTIGATION.md SS6 decision table, applied in explicit priority
     order to resolve the table's overlap between "north star down" and
@@ -70,7 +62,7 @@ def synthesize_recommendation(
 
     has_negative_segment = any(f.excess_contribution < 0 for f in findings)  # EC<0 means v2 worse in that segment (see pipeline.py sign convention)
 
-    blocking = [c.name for c in guardrails.checks if c.breached]
+    blocking = [c.name for c in guardrails.checks if c.breached and c.severity == "blocking"]
 
     # Priority order resolves the documented table's literal overlap between
     # "north star down" and "guardrail breach with no offsetting improvement":
@@ -107,7 +99,8 @@ def synthesize_recommendation(
         primary_reason = "No segment passed the corrected-significance and minimum-effect-size filters for this primary metric."
         dominant_mode = "none"
 
-    next_action = NEXT_ACTION_TEMPLATES.get(dominant_mode, NEXT_ACTION_TEMPLATES["other"])
+    templates = next_action_templates or GENERIC_NEXT_ACTION_TEMPLATES
+    next_action = templates.get(dominant_mode, templates["other"])
 
     return Recommendation(
         verdict=verdict,

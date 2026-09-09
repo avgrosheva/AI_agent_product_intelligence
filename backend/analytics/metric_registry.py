@@ -52,6 +52,14 @@ class MetricDefinition:
     # (latency, turns, cost) and for fractional scores that aren't counts of
     # a binary event (constraint_satisfaction_rate).
     is_rate_metric: bool = False
+    # Stage 4 (configurable metrics): optional display/config metadata.
+    # Defaults keep every metric literal declared before Stage 4 (all of
+    # commerce's, below) valid unchanged; a domain's config-file-loaded
+    # metrics (backend.core.config.load_metric_config) populate these
+    # explicitly instead.
+    label: str = ""                        # human-readable display name; "" means "use name"
+    metric_type: str = "rate"              # "rate" | "continuous" | "ratio" — presentation hint only
+    direction: str = "higher_is_better"    # "higher_is_better" | "lower_is_better"
 
 
 SEMANTIC_CLASSES = {"pre_treatment", "treatment", "post_treatment_mechanism", "outcome", "economic_outcome"}
@@ -675,10 +683,9 @@ METRIC_REGISTRY: list[MetricDefinition] = [
 
 
 def get(name: str) -> MetricDefinition:
-    for m in METRIC_REGISTRY:
-        if m.name == name:
-            return m
-    raise KeyError(f"No metric registered as '{name}'")
+    from backend.core.metrics import get_metric
+
+    return get_metric(name, METRIC_REGISTRY)
 
 
 def pre_treatment_dimensions() -> list[MetricDefinition]:

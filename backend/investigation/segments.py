@@ -1,26 +1,21 @@
 """Bounded segment lattice over PRE-TREATMENT dimensions only
 (INVESTIGATION.md SS1; Stage 2 review requirement #1).
 
-The dimension list is derived directly from
-`backend.analytics.metric_registry.pre_treatment_dimensions()` rather than
-hard-coded here a second time — this is a structural enforcement, not a
-convention: it is impossible for this module to accidentally include a
-post-treatment/mechanism variable (clarification, latency, trajectories,
-tool calls, recommendation properties) as a segmentation dimension without
-also mis-registering it as `semantic_class="pre_treatment"` in the shared
-registry, which is covered by its own tests
-(tests/test_experiment_results.py, tests/test_investigation_segments.py).
+Stage 4: this module is now the fully generic mechanism only — every
+domain-specific input (which dimensions are registered pre_treatment,
+their allowed values, and the curated pairwise allowlist) is passed in by
+the caller, sourced from the active DomainAdapter
+(backend.core.investigation_config.investigation_config_from_adapter), not
+imported here. It is structurally impossible for a caller to segment on a
+post-treatment/mechanism variable without also mis-declaring it
+semantic_class="pre_treatment" in that domain's own metric registry — the
+same structural guarantee as before, just no longer anchored to one
+hardcoded (commerce) registry.
 
 Single-dimension scan: every value of every pre-treatment dimension.
-Pairwise scan: only the curated allowlist (INVESTIGATION.md SS1) — not the
-full combinatorial grid — to keep the test count bounded and every
-surfaced segment explainable in one sentence.
-
-DIMENSION_VALUES/PAIRWISE_ALLOWLIST (Stage 2: domain-agnostic core) are
-commerce domain data, imported from backend.domains.commerce.segments and
-re-exported here — this module's own code (build_segment_registry) is the
-generic mechanism; a non-shopping domain supplies its own dimension
-values/pairwise list instead of these, unchanged mechanism.
+Pairwise scan: only the caller's curated allowlist — not the full
+combinatorial grid — to keep the test count bounded and every surfaced
+segment explainable in one sentence.
 """
 
 from __future__ import annotations
@@ -30,16 +25,7 @@ from typing import Callable
 
 import pandas as pd
 
-from backend.analytics import metric_registry
-from backend.domains.commerce.segments import DIMENSION_VALUES, PAIRWISE_ALLOWLIST
-
-__all__ = ["DIMENSION_VALUES", "PAIRWISE_ALLOWLIST", "registered_pre_treatment_dimensions", "Segment", "build_segment_registry"]
-
-
-def registered_pre_treatment_dimensions() -> list[str]:
-    """The only dimensions this module is allowed to segment on — sourced
-    from the shared registry's semantic_class, not redeclared here."""
-    return [m.name for m in metric_registry.pre_treatment_dimensions()]
+__all__ = ["Segment", "build_segment_registry"]
 
 
 @dataclass(frozen=True)
@@ -50,16 +36,20 @@ class Segment:
     mask_fn: Callable[[pd.DataFrame], pd.Series]
 
 
-def build_segment_registry() -> list[Segment]:
-    dims = registered_pre_treatment_dimensions()
-    missing = set(dims) - set(DIMENSION_VALUES)
+def build_segment_registry(
+    dimension_values: dict[str, list[str]],
+    pairwise_allowlist: list[tuple[str, str]],
+    pre_treatment_dimensions: list[str],
+) -> list[Segment]:
+    dims = pre_treatment_dimensions
+    missing = set(dims) - set(dimension_values)
     if missing:
-        raise ValueError(f"DIMENSION_VALUES is missing values for registered pre-treatment dimensions: {missing}")
+        raise ValueError(f"dimension_values is missing values for registered pre-treatment dimensions: {missing}")
 
     segments: list[Segment] = []
 
     for dim in dims:
-        for value in DIMENSION_VALUES[dim]:
+        for value in dimension_values[dim]:
             segments.append(
                 Segment(
                     label=f"{dim}={value}",
@@ -69,11 +59,11 @@ def build_segment_registry() -> list[Segment]:
                 )
             )
 
-    for dim_a, dim_b in PAIRWISE_ALLOWLIST:
+    for dim_a, dim_b in pairwise_allowlist:
         if dim_a not in dims or dim_b not in dims:
             raise ValueError(f"Pairwise allowlist references a non-registered dimension: {(dim_a, dim_b)}")
-        for va in DIMENSION_VALUES[dim_a]:
-            for vb in DIMENSION_VALUES[dim_b]:
+        for va in dimension_values[dim_a]:
+            for vb in dimension_values[dim_b]:
                 segments.append(
                     Segment(
                         label=f"{dim_a}={va} & {dim_b}={vb}",

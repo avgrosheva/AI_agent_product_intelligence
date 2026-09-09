@@ -58,6 +58,41 @@ class MetricResultSchema(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+def metric_result_to_schema(result) -> "MetricResultSchema":
+    """Shared backend.analytics.experiment_results.MetricResult ->
+    MetricResultSchema mapping — used by every router that surfaces a
+    metric result (commerce's /experiments/*, the generic
+    /domains/{domain}/*), so there is exactly one place that computes
+    is_inferential (not itself a MetricResult field)."""
+    return MetricResultSchema(
+        metric_name=result.metric_name,
+        segment=result.segment,
+        semantic_class=result.semantic_class,
+        is_inferential=result.p_value is not None or result.verdict != "insufficient_evidence",
+        n_sessions_v1=result.n_sessions_v1,
+        n_sessions_v2=result.n_sessions_v2,
+        session_value_v1=result.session_value_v1,
+        session_value_v2=result.session_value_v2,
+        n_users_v1=result.n_users_v1,
+        n_users_v2=result.n_users_v2,
+        cluster_mean_v1=result.cluster_mean_v1,
+        cluster_mean_v2=result.cluster_mean_v2,
+        event_count_v1=result.event_count_v1,
+        event_count_v2=result.event_count_v2,
+        non_event_count_v1=result.non_event_count_v1,
+        non_event_count_v2=result.non_event_count_v2,
+        test_name=result.test_name,
+        p_value=result.p_value,
+        effect_size_name=result.effect_size_name,
+        effect_size_value=result.effect_size_value,
+        ci_low=result.ci_low,
+        ci_high=result.ci_high,
+        ci_stat=result.ci_stat,
+        verdict=result.verdict,
+        notes=result.notes,
+    )
+
+
 class ClassifierProvenance(BaseModel):
     """Stage 3 review requirement #2: any response surfacing
     classifier-derived data must carry this, and a mock classifier's

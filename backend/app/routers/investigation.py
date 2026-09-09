@@ -16,66 +16,20 @@ from functools import lru_cache
 from fastapi import APIRouter, Query
 
 from backend.app.dependencies import get_agent_actions_df, get_base_df, get_experiment_or_404, get_failure_attributions_wide_df
+from backend.app.investigation_serialization import finding_to_schema
 from backend.app.routers.experiments import _to_schema
 from backend.app.schemas.experiments import GuardrailCheckSchema
 from backend.app.schemas.investigation import (
     LENS_METADATA,
     ExploredSegmentSummary,
-    FailureAttributionSchema,
-    FailureModeShare,
-    FindingSchema,
     InvestigationLens,
     InvestigationResponse,
     RecommendationSchema,
-    SegmentFilter,
-    TrajectoryAssociationSchema,
 )
+from backend.domains.commerce.investigation_config import commerce_investigation_config
 from backend.investigation.pipeline import run_investigation
 
 router = APIRouter(tags=["investigation"])
-
-
-def _finding_to_schema(finding) -> FindingSchema:
-    fa = finding.failure_attribution
-    return FindingSchema(
-        segment_label=finding.segment_label,
-        segment_filter=SegmentFilter(dimensions=dict(zip(finding.dimensions, _values_from_label(finding.segment_label)))),
-        n_users_v1=finding.n_users_v1,
-        n_users_v2=finding.n_users_v2,
-        cluster_mean_v1=finding.cluster_mean_v1,
-        cluster_mean_v2=finding.cluster_mean_v2,
-        p_value=finding.p_value,
-        effect_size_value=finding.effect_size_value,
-        excess_contribution=finding.excess_contribution,
-        dominant_failure_mode=finding.dominant_failure_mode,
-        failure_attribution=FailureAttributionSchema(
-            n_v1=fa.n_v1, n_v2=fa.n_v2,
-            abandonment_rate_v1=fa.abandonment_rate_v1, abandonment_rate_v2=fa.abandonment_rate_v2,
-            total_excess_abandonment=fa.total_excess_abandonment, reportable=fa.reportable,
-            per_mode=[
-                FailureModeShare(
-                    failure_mode=m.failure_mode, excess_count=m.excess_count,
-                    share_of_excess_abandonment=m.share_of_excess_abandonment,
-                    raw_share_of_v2_failures=m.raw_share_of_v2_failures,
-                )
-                for m in fa.per_mode
-            ],
-        ),
-        trajectory_associations=[
-            TrajectoryAssociationSchema(
-                pattern=a.pattern, n_sessions=a.n_sessions, pattern_outcome_rate=a.pattern_outcome_rate,
-                baseline_outcome_rate=a.baseline_outcome_rate, test_name=a.test_name, p_value=a.p_value,
-                bh_significant=a.bh_significant,
-            )
-            for a in finding.trajectory_associations
-        ],
-    )
-
-
-def _values_from_label(segment_label: str) -> list[str]:
-    """'constraint_count_bucket=3+ & platform=android' -> ['3+', 'android']."""
-    parts = segment_label.split(" & ")
-    return [p.split("=", 1)[1] for p in parts]
 
 
 @lru_cache(maxsize=32)
@@ -89,7 +43,7 @@ def _run_investigation_cached(experiment_id: str, lens: InvestigationLens):
     actions_df = get_agent_actions_df()
     attributions_wide_df = get_failure_attributions_wide_df()
     lens_meta = LENS_METADATA[lens]
-    return run_investigation(base_df, actions_df, attributions_wide_df, primary_metric_name=lens_meta["metric_name"])
+    return run_investigation(base_df, actions_df, attributions_wide_df, commerce_investigation_config(), primary_metric_name=lens_meta["metric_name"])
 
 
 @router.get("/experiments/{experiment_id}/investigation", response_model=InvestigationResponse)
@@ -126,7 +80,7 @@ def get_investigation(
         overall=_to_schema(result.overall),
         guardrails=guardrail_schemas,
         any_guardrail_breach=result.guardrails.any_breach,
-        findings=[_finding_to_schema(f) for f in result.findings],
+        findings=[finding_to_schema(f) for f in result.findings],
         explored_not_significant=explored,
         recommendation=RecommendationSchema(
             verdict=result.recommendation.verdict,

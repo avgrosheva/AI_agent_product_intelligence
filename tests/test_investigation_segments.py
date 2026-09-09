@@ -1,93 +1,67 @@
-"""Bounded segment registry and pre-treatment-only eligibility
-(INVESTIGATION.md SS1; Stage 2 review requirement #1)."""
+"""Bounded segment registry mechanism (INVESTIGATION.md SS1; Stage 2
+review requirement #1; Stage 4 task 1/7).
+
+Stage 4: build_segment_registry() takes its dimension values, pairwise
+allowlist, and pre-treatment dimension names as explicit arguments — it
+holds no commerce (or any other domain) default of its own. These tests
+exercise the mechanism with small synthetic dimension data, the same
+domain-data-free approach already used for
+test_core_domain_isolation.py::test_evaluate_guardrails_is_generic_and_domain_data_free.
+The commerce-specific regression (its real dimension set, real segment
+count, real pairwise allowlist) lives in
+tests/test_stage2_commerce_adapter_regression.py, next to the other
+commerce-adapter regression proofs.
+"""
 
 from __future__ import annotations
-
-import inspect
 
 import pandas as pd
 import pytest
 
-from backend.analytics import metric_registry
-from backend.investigation import segments as segments_module
-from backend.investigation.segments import (
-    DIMENSION_VALUES,
-    PAIRWISE_ALLOWLIST,
-    build_segment_registry,
-    registered_pre_treatment_dimensions,
-)
-
-POST_TREATMENT_NAMES = {
-    "trajectory_pattern", "has_clarify_action", "tool_call_count",
-    "session_latency_ms", "recommendation_properties",
-}
+from backend.investigation.segments import build_segment_registry
 
 
-def test_registered_dimensions_match_the_shared_registrys_pre_treatment_class():
-    dims = set(registered_pre_treatment_dimensions())
-    expected = {m.name for m in metric_registry.pre_treatment_dimensions()}
-    assert dims == expected
-    assert dims == {"requested_category", "constraint_count_bucket", "platform", "device_tier", "locale", "persona"}
+def test_segment_registry_is_bounded_by_the_given_dimensions_and_allowlist():
+    dimension_values = {"color": ["red", "blue"], "size": ["s", "m", "l"]}
+    pairwise_allowlist = [("color", "size")]
+    pre_treatment_dimensions = ["color", "size"]
+
+    segs = build_segment_registry(dimension_values, pairwise_allowlist, pre_treatment_dimensions)
+    single_dim_count = sum(len(v) for v in dimension_values.values())
+    pairwise_count = len(dimension_values["color"]) * len(dimension_values["size"])
+    assert len(segs) == single_dim_count + pairwise_count == 5 + 6
 
 
-def test_no_post_treatment_variable_is_ever_a_segment_dimension():
-    dims = set(registered_pre_treatment_dimensions())
-    assert dims.isdisjoint(POST_TREATMENT_NAMES)
-    for dim_a, dim_b in PAIRWISE_ALLOWLIST:
-        assert dim_a not in POST_TREATMENT_NAMES
-        assert dim_b not in POST_TREATMENT_NAMES
-
-
-def test_segment_module_source_never_references_post_treatment_columns():
-    """Structural guard: the module's actual segment-building code must
-    never mention a mechanism variable, not even as a hard-coded string."""
-    source = inspect.getsource(segments_module)
-    for forbidden in ["clarify", "latency_ms", "trajectory", "tool_call", "satisfies_constraints", "has_consecutive_search"]:
-        assert forbidden not in source, f"segments.py references a post-treatment concept: {forbidden}"
-
-
-def test_segment_registry_is_bounded():
-    segs = build_segment_registry()
-    single_dim_count = sum(len(v) for v in DIMENSION_VALUES.values())
-    pairwise_count = sum(len(DIMENSION_VALUES[a]) * len(DIMENSION_VALUES[b]) for a, b in PAIRWISE_ALLOWLIST)
-    assert len(segs) == single_dim_count + pairwise_count
-    assert len(segs) < 100, "segment lattice should stay bounded, not expand into a general search"
-
-
-def test_every_segment_mask_only_touches_registered_dimensions():
-    df = pd.DataFrame(
-        {
-            "requested_category": ["laptop", "monitor", "accessory"],
-            "constraint_count_bucket": ["0-1", "2", "3+"],
-            "platform": ["web", "ios", "android"],
-            "device_tier": ["low", "mid", "high"],
-            "locale": ["ru-RU", "en-US", "ru-RU"],
-            "persona": ["budget", "mainstream", "power_user"],
-        }
-    )
-    for seg in build_segment_registry():
+def test_every_segment_mask_only_touches_given_dimensions():
+    dimension_values = {"color": ["red", "blue"], "size": ["s", "m"]}
+    df = pd.DataFrame({"color": ["red", "blue", "red"], "size": ["s", "m", "m"]})
+    for seg in build_segment_registry(dimension_values, [("color", "size")], ["color", "size"]):
         mask = seg.mask_fn(df)
         assert isinstance(mask, pd.Series)
         assert mask.dtype == bool
 
 
-def test_single_dimension_segments_cover_every_documented_value():
-    segs = build_segment_registry()
+def test_single_dimension_segments_cover_every_given_value():
+    dimension_values = {"color": ["red", "blue", "green"]}
+    segs = build_segment_registry(dimension_values, [], ["color"])
     single = [s for s in segs if len(s.dimensions) == 1]
-    for dim, values in DIMENSION_VALUES.items():
-        labels = {s.label for s in single if s.dimensions == (dim,)}
-        assert labels == {f"{dim}={v}" for v in values}
+    labels = {s.label for s in single}
+    assert labels == {"color=red", "color=blue", "color=green"}
 
 
-def test_pairwise_allowlist_is_curated_not_the_full_grid():
-    """6 pre-treatment dims -> 15 possible pairs; the allowlist must be a
-    small curated subset, not the full combinatorial grid."""
-    n_dims = len(registered_pre_treatment_dimensions())
-    full_grid_size = n_dims * (n_dims - 1) // 2
-    assert len(PAIRWISE_ALLOWLIST) < full_grid_size
+def test_pairwise_segments_are_only_the_curated_allowlist_not_the_full_grid():
+    dimension_values = {"a": ["1", "2"], "b": ["x", "y"], "c": ["p", "q"]}
+    # a-b-c would be 3 possible pairs; only one is allowlisted
+    segs = build_segment_registry(dimension_values, [("a", "b")], ["a", "b", "c"])
+    pairwise_dims = {s.dimensions for s in segs if len(s.dimensions) == 2}
+    assert pairwise_dims == {("a", "b")}
 
 
-def test_dimension_values_raises_on_missing_registered_dimension(monkeypatch):
-    monkeypatch.setattr(segments_module, "DIMENSION_VALUES", {"requested_category": ["laptop"]})
+def test_dimension_values_raises_on_missing_registered_dimension():
     with pytest.raises(ValueError):
-        build_segment_registry()
+        build_segment_registry({"a": ["1"]}, [], ["a", "b"])
+
+
+def test_pairwise_allowlist_raises_on_non_registered_dimension():
+    with pytest.raises(ValueError):
+        build_segment_registry({"a": ["1"], "b": ["2"]}, [("a", "c")], ["a", "b"])

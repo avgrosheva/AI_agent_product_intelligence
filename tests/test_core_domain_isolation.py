@@ -130,7 +130,8 @@ def test_evaluate_guardrails_is_generic_and_domain_data_free():
             name="p95_resolution_time",
             column="resolution_time_seconds",
             aggregation="p95_raw",
-            comparison="ratio",
+            kind="ratio",
+            direction="increase_is_bad",
             threshold=1.1,
         )
     ]
@@ -177,6 +178,26 @@ def test_support_domain_never_imports_commerce_orm_models_or_commerce_domain():
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("backend.domains.commerce"):
                 raise AssertionError(f"{module.__name__} imports the commerce domain from {node.module}")
+
+
+def test_investigation_package_never_imports_commerce_domain_or_commerce_llm_client():
+    """Stage 4 task 1/7: the generic Investigation engine (segment scan,
+    scoring, recommendation synthesis, failure attribution, trajectory
+    attribution, orchestration) must never import backend.domains.commerce
+    or backend.llm.client (the module commerce's FAILURE_MECHANISMS tuple
+    used to leak from) — every domain-specific input now arrives as an
+    explicit InvestigationConfig argument, sourced by the caller from the
+    active DomainAdapter."""
+    import backend.investigation
+
+    forbidden_prefixes = ("backend.domains.commerce", "backend.llm.client")
+    for _, name, _ in pkgutil.walk_packages(backend.investigation.__path__, prefix="backend.investigation."):
+        module = importlib.import_module(name)
+        tree = ast.parse(inspect.getsource(module))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                for forbidden in forbidden_prefixes:
+                    assert not node.module.startswith(forbidden), f"{module.__name__} imports from {node.module}, which starts with forbidden prefix {forbidden!r}"
 
 
 def test_domain_adapter_protocol_is_satisfied_structurally_by_both_domains():

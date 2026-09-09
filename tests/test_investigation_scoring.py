@@ -10,6 +10,7 @@ import pytest
 from backend.analytics import metric_registry
 from backend.analytics.experiment_results import analyze_metric
 from backend.analytics.sql_runner import run_sql_file
+from backend.domains.commerce.investigation_config import commerce_investigation_config
 from backend.investigation.scoring import (
     apply_bh_correction,
     compute_excess_contribution,
@@ -17,6 +18,8 @@ from backend.investigation.scoring import (
     run_segment_scan,
 )
 from backend.investigation.thresholds import TOP_K_FINDINGS
+
+_COMMERCE_CONFIG = commerce_investigation_config()
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +30,7 @@ def base_df(db_engine):
 def test_segment_scan_uses_user_level_sample_sizes_everywhere(base_df):
     """Stage 2 review requirement #2: no fallback to session-independent
     inference anywhere in the scan."""
-    rows = run_segment_scan(base_df, "abandonment_rate")
+    rows = run_segment_scan(base_df, "abandonment_rate", _COMMERCE_CONFIG)
     assert len(rows) > 0
     for row in rows:
         assert row.result.n_users_v1 <= row.result.n_sessions_v1
@@ -40,11 +43,11 @@ def test_segment_scan_matches_direct_analyze_metric_call(base_df):
     the same mask."""
     from backend.investigation.segments import build_segment_registry
 
-    seg = next(s for s in build_segment_registry() if s.label == "platform=android")
+    seg = next(s for s in build_segment_registry(_COMMERCE_CONFIG.dimension_values, _COMMERCE_CONFIG.pairwise_allowlist, _COMMERCE_CONFIG.pre_treatment_dimensions) if s.label == "platform=android")
     mask = seg.mask_fn(base_df)
     direct = analyze_metric(base_df, metric_registry.get("abandonment_rate"), segment_label=seg.label, segment_mask=mask)
 
-    rows = run_segment_scan(base_df, "abandonment_rate")
+    rows = run_segment_scan(base_df, "abandonment_rate", _COMMERCE_CONFIG)
     scanned = next(r for r in rows if r.segment.label == "platform=android")
 
     assert scanned.result.cluster_mean_v1 == direct.cluster_mean_v1
@@ -53,7 +56,7 @@ def test_segment_scan_matches_direct_analyze_metric_call(base_df):
 
 
 def test_bh_correction_only_applied_to_testable_segments(base_df):
-    rows = run_segment_scan(base_df, "conversion_rate")
+    rows = run_segment_scan(base_df, "conversion_rate", _COMMERCE_CONFIG)
     rows = apply_bh_correction(rows)
     insufficient = [r for r in rows if r.result.verdict == "insufficient_evidence"]
     for r in insufficient:
@@ -64,7 +67,7 @@ def test_bh_correction_is_stricter_than_uncorrected_alpha(base_df):
     """With ~55 simultaneous tests, BH at q=0.10 should reject fewer
     segments than a naive p<0.05 pass would flag as nominally significant —
     demonstrating the correction is actually doing something."""
-    rows = run_segment_scan(base_df, "conversion_rate")
+    rows = run_segment_scan(base_df, "conversion_rate", _COMMERCE_CONFIG)
     naive_significant = sum(1 for r in rows if r.result.p_value is not None and r.result.p_value < 0.05)
     rows = apply_bh_correction(rows)
     corrected_significant = sum(1 for r in rows if r.bh_significant)
@@ -74,9 +77,9 @@ def test_bh_correction_is_stricter_than_uncorrected_alpha(base_df):
 def test_excess_contribution_partitions_by_user_share(base_df):
     metric = metric_registry.get("abandonment_rate")
     overall = analyze_metric(base_df, metric)
-    rows = run_segment_scan(base_df, "abandonment_rate")
+    rows = run_segment_scan(base_df, "abandonment_rate", _COMMERCE_CONFIG)
     rows = apply_bh_correction(rows)
-    rows = compute_excess_contribution(base_df, rows, "abandonment_rate", overall)
+    rows = compute_excess_contribution(base_df, rows, "abandonment_rate", overall, _COMMERCE_CONFIG)
     for row in rows:
         if row.excess_contribution is not None:
             n_segment_users = row.result.n_users_v1 + row.result.n_users_v2
@@ -90,9 +93,9 @@ def test_excess_contribution_partitions_by_user_share(base_df):
 def test_rank_findings_returns_at_most_top_k(base_df):
     metric = metric_registry.get("abandonment_rate")
     overall = analyze_metric(base_df, metric)
-    rows = run_segment_scan(base_df, "abandonment_rate")
+    rows = run_segment_scan(base_df, "abandonment_rate", _COMMERCE_CONFIG)
     rows = apply_bh_correction(rows)
-    rows = compute_excess_contribution(base_df, rows, "abandonment_rate", overall)
+    rows = compute_excess_contribution(base_df, rows, "abandonment_rate", overall, _COMMERCE_CONFIG)
     top = rank_findings(rows, top_k=TOP_K_FINDINGS)
     assert len(top) <= TOP_K_FINDINGS
     # every returned finding must actually be BH-significant and pass the min-effect filter

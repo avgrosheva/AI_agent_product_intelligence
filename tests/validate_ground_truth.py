@@ -36,11 +36,14 @@ from backend.analytics import metric_registry
 from backend.analytics.experiment_results import analyze_metric
 from backend.analytics.sql_runner import run_sql_file
 from backend.analytics.stats.clustering import cluster_arrays
+from backend.domains.commerce.investigation_config import commerce_investigation_config
 from backend.investigation.pipeline import run_investigation
 from backend.investigation.scoring import apply_bh_correction, compute_excess_contribution, run_segment_scan, scan_to_dataframe
 from backend.investigation.segments import build_segment_registry
 from backend.investigation.trajectory_attribution import _structural_features, reconstruct_trajectories
 from backend.llm.client import FAILURE_MECHANISMS
+
+_COMMERCE_CONFIG = commerce_investigation_config()
 
 DATA_DIR = Path("data")
 PROFILE = "dev"
@@ -83,12 +86,12 @@ def failure_attributions_wide_df(classified_engine):
 
 @pytest.fixture(scope="module")
 def investigation_abandonment(base_df, agent_actions_df, failure_attributions_wide_df):
-    return run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, primary_metric_name="abandonment_rate")
+    return run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, _COMMERCE_CONFIG, primary_metric_name="abandonment_rate")
 
 
 @pytest.fixture(scope="module")
 def investigation_satisfaction(base_df, agent_actions_df, failure_attributions_wide_df):
-    return run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, primary_metric_name="constraint_satisfaction_rate")
+    return run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, _COMMERCE_CONFIG, primary_metric_name="constraint_satisfaction_rate")
 
 
 @pytest.fixture(scope="module")
@@ -98,9 +101,9 @@ def raw_satisfaction_scan(base_df):
     observable-data-only — no ground truth involved)."""
     metric = metric_registry.get("constraint_satisfaction_rate")
     overall = analyze_metric(base_df, metric)
-    rows = run_segment_scan(base_df, "constraint_satisfaction_rate")
+    rows = run_segment_scan(base_df, "constraint_satisfaction_rate", _COMMERCE_CONFIG)
     rows = apply_bh_correction(rows)
-    rows = compute_excess_contribution(base_df, rows, "constraint_satisfaction_rate", overall)
+    rows = compute_excess_contribution(base_df, rows, "constraint_satisfaction_rate", overall, _COMMERCE_CONFIG)
     return scan_to_dataframe(rows)
 
 
@@ -217,7 +220,11 @@ def test_no_more_than_one_spurious_top_finding_per_run(base_df, investigation_ab
     def unexplained_findings(result) -> list[str]:
         unexplained = []
         for finding in result.findings:
-            seg = next(s for s in build_segment_registry() if s.label == finding.segment_label)
+            seg = next(
+                s
+                for s in build_segment_registry(_COMMERCE_CONFIG.dimension_values, _COMMERCE_CONFIG.pairwise_allowlist, _COMMERCE_CONFIG.pre_treatment_dimensions)
+                if s.label == finding.segment_label
+            )
             mask = seg.mask_fn(base_df)
             sids = base_df.loc[mask, "session_id"].astype(str)  # ground_truth's session_id is str (parquet); base_df's is UUID (DB)
             scenarios = scenario_by_session.reindex(sids).value_counts(normalize=True)

@@ -22,10 +22,11 @@ from typing import Protocol
 
 import pandas as pd
 
-from backend.core.attribution import MechanismRegistry
+from backend.core.attribution import MechanismRegistry, ReviewableAttribution
 from backend.core.guardrails import GuardrailDefinition
 from backend.core.metrics import MetricDefinition
-from backend.core.session import CoreSessionContext
+from backend.core.session import CoreSessionContext, GenericExperimentInfo
+from backend.core.trajectory_config import TrajectoryConfig
 
 
 class DomainAdapter(Protocol):
@@ -56,4 +57,60 @@ class DomainAdapter(Protocol):
     def mechanisms(self) -> MechanismRegistry:
         """May be an empty MechanismRegistry([]) — not every domain has a
         relevant automatic failure detector."""
+        ...
+
+    def segment_dimensions(self) -> dict[str, list[str]]:
+        """dimension_name -> allowed values, for every pre_treatment
+        MetricDefinition this domain registers (Stage 4 task 1/2). May be
+        an empty dict — a domain with no pre-treatment dimension registered
+        simply has no segment scan (the investigation pipeline degrades to
+        an empty scan, not an error)."""
+        ...
+
+    def pairwise_segment_allowlist(self) -> list[tuple[str, str]]:
+        """Curated two-dimension segment pairs to additionally scan (never
+        the full combinatorial grid). May be empty."""
+        ...
+
+    def next_action_templates(self) -> dict[str, str]:
+        """failure_mode -> remediation prose, keyed the same way as
+        mechanisms().all_names, plus "other"/"none". May return an empty
+        dict (or None) to fall back to backend.core.next_actions.
+        GENERIC_NEXT_ACTION_TEMPLATES — the domain-provided-or-generic
+        choice Stage 4 task 1 requires."""
+        ...
+
+    def list_experiments(self) -> list[GenericExperimentInfo]:
+        """Stage 5: every experiment this domain has data for — the
+        generic /domains/{domain}/experiments listing's only data source."""
+        ...
+
+    def agent_actions_df(self, experiment_id: str | None = None) -> pd.DataFrame:
+        """Columns: session_id, sequence_index, action_type — the same
+        shape backend.investigation.trajectory_attribution.
+        reconstruct_trajectories already expects. Empty (but correctly
+        shaped) is valid for a domain that never registers a mechanism and
+        so never runs trajectory attribution."""
+        ...
+
+    def failure_attributions_wide_df(self) -> pd.DataFrame:
+        """One row per session_id, one boolean column per
+        mechanisms().all_names entry (NaN = not evaluated). A domain with
+        an empty MechanismRegistry returns an empty frame with just the
+        session_id join key (Stage 3 task 7) — run_investigation treats
+        that as a no-op merge."""
+        ...
+
+    def trajectory_config(self) -> TrajectoryConfig:
+        """Stage 5 task 5: which outcome/action-type literals trajectory
+        attribution looks for, for THIS domain. Unused (but still must
+        return a coherent object) for a domain with no registered
+        mechanisms, since that code path is never reached for it."""
+        ...
+
+    def list_reviewable_attributions(self, experiment_id: str | None = None, session_id: str | None = None) -> list[ReviewableAttribution]:
+        """Stage 6 task 3/5: every detected=true mechanism instance a human
+        analyst could review, optionally scoped to one experiment and/or
+        one session. May be empty for a domain with no attribution storage
+        (support — no mechanisms registered, nothing to review)."""
         ...

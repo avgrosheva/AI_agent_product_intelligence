@@ -11,15 +11,27 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from backend.core.attribution import MechanismRegistry
+from backend.core.attribution import MechanismRegistry, ReviewableAttribution
 from backend.core.guardrails import GuardrailDefinition
 from backend.core.metrics import MetricDefinition
-from backend.core.session import GenericSessionContext, GenericToolCall
+from backend.core.next_actions import GENERIC_NEXT_ACTION_TEMPLATES
+from backend.core.session import GenericExperimentInfo, GenericSessionContext, GenericToolCall
+from backend.core.trajectory_config import TrajectoryConfig
 from backend.domains.support.guardrails import SUPPORT_GUARDRAILS
 from backend.domains.support.mechanisms import SUPPORT_MECHANISMS
 from backend.domains.support.metrics import SUPPORT_METRIC_REGISTRY, SUPPORT_METRIC_VALUE_COLUMNS
 
 DOMAIN = "support"
+
+# Stage 4 task 2/5: the support domain's one pre-treatment segment
+# dimension — set at ticket intake, before any agent action, mirroring
+# commerce's requested_category. Fixed here as data (same shape as
+# backend.domains.commerce.segments.DIMENSION_VALUES) rather than
+# discovered from live data, so the segment scan is bounded and every
+# surfaced segment stays explainable in one sentence, same as commerce.
+SEGMENT_DIMENSION_VALUES: dict[str, list[str]] = {
+    "ticket_category": ["billing", "technical", "account_access", "shipping_status", "general_inquiry"],
+}
 
 
 class SupportAdapter:
@@ -33,7 +45,8 @@ class SupportAdapter:
             sessions = pd.read_sql(
                 text(
                     "SELECT session_id, experiment_id, agent_version, external_user_id AS user_id, "
-                    "outcome_label, started_at, ended_at FROM ingested_sessions WHERE domain = :domain"
+                    "outcome_label, started_at, ended_at, context->>'ticket_category' AS ticket_category "
+                    "FROM ingested_sessions WHERE domain = :domain"
                 ),
                 conn,
                 params={"domain": self.domain},
@@ -151,3 +164,72 @@ class SupportAdapter:
 
     def mechanisms(self) -> MechanismRegistry:
         return SUPPORT_MECHANISMS
+
+    def segment_dimensions(self) -> dict[str, list[str]]:
+        return SEGMENT_DIMENSION_VALUES
+
+    def pairwise_segment_allowlist(self) -> list[tuple[str, str]]:
+        # Only one pre-treatment dimension is registered, so there is no
+        # pair to curate — an empty allowlist, not the (impossible) full grid.
+        return []
+
+    def next_action_templates(self) -> dict[str, str]:
+        # No mechanisms registered (see mechanisms() above) means a
+        # finding's dominant_failure_mode is always None -> "none": the
+        # generic fallback is genuinely all this domain needs, proving the
+        # "domain-provided OR generic" choice (Stage 4 task 1).
+        return GENERIC_NEXT_ACTION_TEMPLATES
+
+    def list_experiments(self) -> list[GenericExperimentInfo]:
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT experiment_id::text AS experiment_id, name, control_version, treatment_version, "
+                    "start_date::text AS start_date, end_date::text AS end_date FROM ingested_experiments "
+                    "WHERE domain = :domain ORDER BY start_date"
+                ),
+                {"domain": self.domain},
+            ).mappings().all()
+        return [
+            GenericExperimentInfo(
+                experiment_id=r["experiment_id"], name=r["name"], control_version=r["control_version"],
+                treatment_version=r["treatment_version"], start_date=r["start_date"], end_date=r["end_date"],
+            )
+            for r in rows
+        ]
+
+    def agent_actions_df(self, experiment_id: str | None = None) -> pd.DataFrame:
+        query = (
+            "SELECT a.session_id, a.sequence_index, a.action_type FROM ingested_actions a "
+            "JOIN ingested_sessions s ON s.session_id = a.session_id WHERE s.domain = :domain"
+        )
+        params: dict[str, str] = {"domain": self.domain}
+        if experiment_id is not None:
+            query += " AND s.experiment_id::text = :eid"
+            params["eid"] = experiment_id
+        with self._engine.connect() as conn:
+            df = pd.read_sql(text(query), conn, params=params)
+        df["session_id"] = df["session_id"].astype(str)
+        return df
+
+    def failure_attributions_wide_df(self) -> pd.DataFrame:
+        # No generic failure-attribution storage exists for this domain
+        # (mechanisms() is empty — Stage 3 task 7): an empty frame with
+        # just the join key is what run_investigation expects in that case.
+        return pd.DataFrame(columns=["session_id"])
+
+    def trajectory_config(self) -> TrajectoryConfig:
+        # Unreached in practice (mechanisms() is empty, so
+        # run_investigation never evaluates trajectory associations for
+        # this domain — see pipeline.py's `if config.mechanisms:` guard),
+        # but still a coherent, domain-appropriate config rather than
+        # commerce's literals: this domain's own outcome/action vocabulary.
+        return TrajectoryConfig(
+            outcome_column="outcome_label", negative_outcome_value="abandoned", positive_outcome_column="resolved",
+            clarify_action="clarify", repeat_action="triage_ticket", terminal_negative_action="escalate",
+        )
+
+    def list_reviewable_attributions(self, experiment_id: str | None = None, session_id: str | None = None) -> list[ReviewableAttribution]:
+        # No generic failure-attribution storage exists for this domain
+        # (mechanisms() is empty — Stage 3 task 7): nothing to review.
+        return []

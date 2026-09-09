@@ -29,6 +29,7 @@ from backend.app.schemas.sessions import (
     ToolCallSchema,
 )
 from backend.llm.provenance import current_classifier_provenance_fields, get_evaluation_status
+from backend.review.service import get_reviews_for_session
 
 router = APIRouter(tags=["sessions"])
 
@@ -188,6 +189,7 @@ def get_session_detail(session_id: str) -> SessionDetailResponse:
         ).mappings().all()
 
     provenance = _classifier_provenance()
+    reviews_by_mode = get_reviews_for_session(get_engine(), "commerce", session_id)
     failure_attributions = [
         FailureClassificationSchema(
             failure_mode=r["failure_mode"],
@@ -195,6 +197,9 @@ def get_session_detail(session_id: str) -> SessionDetailResponse:
             confidence=r["confidence"],
             evidence_text=r["evidence_text"],
             provenance=provenance,
+            review_status=(reviews_by_mode[r["failure_mode"]].decision if r["failure_mode"] in reviews_by_mode else "unreviewed"),
+            corrected_mechanism=(reviews_by_mode[r["failure_mode"]].corrected_mechanism if r["failure_mode"] in reviews_by_mode else None),
+            review_note=(reviews_by_mode[r["failure_mode"]].note if r["failure_mode"] in reviews_by_mode else None),
         )
         for r in attribution_rows
     ]

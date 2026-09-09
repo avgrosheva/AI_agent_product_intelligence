@@ -45,10 +45,11 @@ def test_guardrails_match_known_demo_scale_values():
     (backend.domains.commerce.guardrails.COMMERCE_GUARDRAILS) reproduces
     the same three checks the old hardcoded check_guardrails() body did."""
     from backend.analytics.sql_runner import run_sql_file
-    from backend.investigation.recommend import check_guardrails
+    from backend.core.guardrails import evaluate_guardrails
+    from backend.domains.commerce.guardrails import COMMERCE_GUARDRAILS
 
     df = run_sql_file(_demo_engine(), "session_level_base.sql")
-    report = check_guardrails(df)
+    report = evaluate_guardrails(df, COMMERCE_GUARDRAILS)
     by_name = {c.name: c for c in report.checks}
 
     assert set(by_name) == {"p95_latency", "tool_error_rate", "cost_per_session"}
@@ -82,6 +83,7 @@ def test_investigation_hold_verdict_unchanged_at_demo_scale():
     from sqlalchemy import text
 
     from backend.analytics.sql_runner import run_sql_file
+    from backend.domains.commerce.investigation_config import commerce_investigation_config
     from backend.llm.client import FAILURE_MECHANISMS
     from backend.investigation.pipeline import run_investigation
 
@@ -100,7 +102,7 @@ def test_investigation_hold_verdict_unchanged_at_demo_scale():
         wide = long_df.pivot_table(index="session_id", columns="failure_mode", values="detected", aggfunc="first")
         wide = wide.reindex(columns=list(FAILURE_MECHANISMS)).reset_index()
 
-    result = run_investigation(base_df, actions_df, wide, primary_metric_name="abandonment_rate")
+    result = run_investigation(base_df, actions_df, wide, commerce_investigation_config(), primary_metric_name="abandonment_rate")
 
     assert result.recommendation.verdict == "hold"
     assert "p95_latency" in result.recommendation.blocking_guardrails

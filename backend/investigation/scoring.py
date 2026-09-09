@@ -6,6 +6,11 @@ Every per-segment comparison goes through `experiment_results.analyze_metric`
 the Stage 2 metric table. This module adds no separate, session-level
 inference path: Stage 2 review requirement #2 explicitly forbids falling
 back to session-independent inference anywhere in the scan.
+
+Stage 4: every domain-specific input (which metric registry/value-columns
+to use, which dimensions/allowlist to scan) comes from the caller's
+InvestigationConfig — this module holds no commerce (or any other domain)
+default of its own.
 """
 
 from __future__ import annotations
@@ -15,9 +20,10 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from backend.analytics import metric_registry
 from backend.analytics.experiment_results import MetricResult, analyze_metric
 from backend.analytics.stats.correction import benjamini_hochberg
+from backend.core.investigation_config import InvestigationConfig
+from backend.core.metrics import get_metric
 from backend.investigation.segments import Segment, build_segment_registry
 from backend.investigation.thresholds import BH_Q, MIN_ABSOLUTE_EFFECT_RATE, MIN_COHENS_D
 
@@ -31,14 +37,14 @@ class SegmentScanRow:
     meets_min_effect: bool = False
 
 
-def run_segment_scan(df: pd.DataFrame, primary_metric_name: str) -> list[SegmentScanRow]:
+def run_segment_scan(df: pd.DataFrame, primary_metric_name: str, config: InvestigationConfig) -> list[SegmentScanRow]:
     """One cluster-aware comparison per candidate segment (INVESTIGATION.md SS1-SS3 steps 1-2)."""
-    metric = metric_registry.get(primary_metric_name)
-    segments = build_segment_registry()
+    metric = get_metric(primary_metric_name, config.metric_registry)
+    segments = build_segment_registry(config.dimension_values, config.pairwise_allowlist, config.pre_treatment_dimensions)
     rows: list[SegmentScanRow] = []
     for seg in segments:
         mask = seg.mask_fn(df)
-        result = analyze_metric(df, metric, segment_label=seg.label, segment_mask=mask)
+        result = analyze_metric(df, metric, segment_label=seg.label, segment_mask=mask, metric_value_columns=config.metric_value_columns)
         rows.append(SegmentScanRow(segment=seg, result=result))
     return rows
 
@@ -68,9 +74,11 @@ def _meets_min_effect(row: SegmentScanRow, metric_def) -> bool:
     return abs(r.effect_size_value) >= MIN_COHENS_D
 
 
-def compute_excess_contribution(df: pd.DataFrame, rows: list[SegmentScanRow], primary_metric_name: str, overall_result: MetricResult) -> list[SegmentScanRow]:
+def compute_excess_contribution(
+    df: pd.DataFrame, rows: list[SegmentScanRow], primary_metric_name: str, overall_result: MetricResult, config: InvestigationConfig
+) -> list[SegmentScanRow]:
     """EC(s) = user_share(s) x (segment_delta(s) - overall_delta) (INVESTIGATION.md SS2, as revised)."""
-    metric_def = metric_registry.get(primary_metric_name)
+    metric_def = get_metric(primary_metric_name, config.metric_registry)
     total_users = df["user_id"].nunique()
     overall_delta = None
     if overall_result.cluster_mean_v1 is not None and overall_result.cluster_mean_v2 is not None:

@@ -6,6 +6,9 @@ from sqlalchemy import engine_from_config, pool
 from backend.app.db import get_database_url
 from backend.app.models import Base
 import backend.ingestion.models  # noqa: F401 -- registers the generic ingestion tables onto Base.metadata for autogenerate
+import backend.release.models  # noqa: F401 -- registers the release-evaluation history table onto Base.metadata for autogenerate
+import backend.alerts.models  # noqa: F401 -- registers the alerts table onto Base.metadata for autogenerate
+import backend.review.models  # noqa: F401 -- registers the attribution_reviews table onto Base.metadata for autogenerate
 
 config = context.config
 

@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel
+
+
+class ReviewRequest(BaseModel):
+    decision: Literal["confirmed", "rejected"]
+    corrected_mechanism: str | None = None
+    note: str | None = None
+    reviewer: str | None = None
+
+
+class ReviewSchema(BaseModel):
+    review_id: str
+    domain: str
+    session_id: str
+    failure_mode: str
+    decision: Literal["confirmed", "rejected"]
+    corrected_mechanism: str | None
+    note: str | None
+    reviewer: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionReviewsResponse(BaseModel):
+    domain: str
+    session_id: str
+    reviews: list[ReviewSchema]
+
+
+class ReviewQueueItemSchema(BaseModel):
+    session_id: str
+    experiment_id: str
+    agent_version: str
+    failure_mode: str
+    detector_source: str
+    confidence: float | None
+    evidence_text: str | None
+    reviewed: bool
+
+
+class ReviewQueueResponse(BaseModel):
+    domain: str
+    items: list[ReviewQueueItemSchema]
+    total: int
+    limit: int
+    offset: int

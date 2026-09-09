@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -88,13 +89,21 @@ class EvaluationSchema(BaseModel):
 class FailureClassificationSchema(BaseModel):
     """One detected mechanism (hybrid multi-label redesign) — a session's
     SessionDetailResponse carries a list of these, one per mechanism that
-    actually fired, not a single exclusive classification."""
+    actually fired, not a single exclusive classification.
+
+    Stage 6 task 4: review_status/corrected_mechanism/review_note surface
+    an analyst's decision (backend.review) alongside the original,
+    unmodified detector output above — the review is never merged into or
+    used to overwrite failure_mode/confidence/evidence_text."""
 
     failure_mode: str
     detector_source: str  # "deterministic" | "real_llm" | "mock_llm"
     confidence: float | None
     evidence_text: str | None
     provenance: ClassifierProvenance
+    review_status: Literal["unreviewed", "confirmed", "rejected"] = "unreviewed"
+    corrected_mechanism: str | None = None
+    review_note: str | None = None
 
 
 class SessionDetailResponse(BaseModel):

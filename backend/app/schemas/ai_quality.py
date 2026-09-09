@@ -17,6 +17,13 @@ class FailureMechanismPrevalenceItem(BaseModel):
     count_v2: int
     rate_v1: float
     rate_v2: float
+    # Stage 6 task 4: how much of this mechanism's detected=true population
+    # (across both arms) an analyst has reviewed and what they decided —
+    # counts, never a modification of count_v1/count_v2/rate_v1/rate_v2
+    # above, which stay the original detector output.
+    reviewed_count: int = 0
+    confirmed_count: int = 0
+    rejected_count: int = 0
 
 
 class ToolUseQualitySchema(BaseModel):

@@ -9,7 +9,7 @@ backend/domains/<domain_name>/ instead — backend/domains/commerce/ is the
 one that backs the current shopping demo.
 
 This package intentionally does not replace or move existing domain code
-(SessionContext, MechanismResult, check_guardrails, the metric registry)
+(SessionContext, MechanismResult, evaluate_guardrails, the metric registry)
 — those keep working exactly as before. It adds the generic layer those
 concrete, commerce-specific implementations now sit on top of: a
 mechanism/guardrail can be REGISTERED generically here, and the commerce

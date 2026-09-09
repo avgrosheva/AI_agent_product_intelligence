@@ -80,10 +80,24 @@ def test_ship_requires_no_negative_segment_even_if_north_star_up():
 
 
 def test_next_action_matches_dominant_failure_mode_of_top_finding():
+    from backend.domains.commerce.next_actions import NEXT_ACTION_TEMPLATES
+
     result = synthesize_recommendation(
-        _metric_result(0.20, 0.205, 0.60), findings=[_finding(-0.05), _finding(0.01)], guardrails=_guardrails(False)
+        _metric_result(0.20, 0.205, 0.60), findings=[_finding(-0.05), _finding(0.01)], guardrails=_guardrails(False),
+        next_action_templates=NEXT_ACTION_TEMPLATES,
     )
     assert "constraint" in result.next_action.lower() or "parsing" in result.next_action.lower()
+
+
+def test_next_action_falls_back_to_generic_templates_when_domain_provides_none():
+    """Stage 4 task 1: next-action recommendations must be domain-provided
+    OR generic — with no next_action_templates argument at all,
+    synthesize_recommendation must still work (never import or default to
+    commerce data internally)."""
+    result = synthesize_recommendation(
+        _metric_result(0.20, 0.205, 0.60), findings=[_finding(-0.05)], guardrails=_guardrails(False)
+    )
+    assert result.next_action  # some generic remediation text, not a crash
 
 
 def test_primary_reason_cites_the_largest_absolute_excess_contribution():

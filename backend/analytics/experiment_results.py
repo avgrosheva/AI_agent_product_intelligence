@@ -171,14 +171,27 @@ def analyze_metric(
     return result
 
 
-def analyze_all_metrics(df: pd.DataFrame, metric_registry: list, segment_label: str = "all sessions", segment_mask: pd.Series | None = None) -> list[MetricResult]:
+def analyze_all_metrics(
+    df: pd.DataFrame,
+    metric_registry: list,
+    segment_label: str = "all sessions",
+    segment_mask: pd.Series | None = None,
+    metric_value_columns: dict[str, tuple[str, object]] | None = None,
+) -> list[MetricResult]:
+    """`metric_value_columns` defaults to the commerce binding
+    (module-level METRIC_VALUE_COLUMNS, unchanged for every existing call
+    site) — pass a domain adapter's own metric_value_columns() to compute
+    ITS metrics instead (Stage 5: the same domain-pluggability fix Stage 3
+    already applied to analyze_metric() itself, which this function had
+    not received)."""
+    columns = metric_value_columns if metric_value_columns is not None else METRIC_VALUE_COLUMNS
     results = []
     for metric in metric_registry:
         if not metric.implemented or not metric.is_inferential:
             continue
-        if metric.name not in METRIC_VALUE_COLUMNS:
+        if metric.name not in columns:
             continue
-        results.append(analyze_metric(df, metric, segment_label=segment_label, segment_mask=segment_mask))
+        results.append(analyze_metric(df, metric, segment_label=segment_label, segment_mask=segment_mask, metric_value_columns=columns))
     return results
 
 

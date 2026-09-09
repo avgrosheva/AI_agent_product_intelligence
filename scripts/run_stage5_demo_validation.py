@@ -23,11 +23,14 @@ from backend.analytics.data_quality import report_to_dataframe, run_full_report
 from backend.analytics.experiment_results import analyze_all_metrics, analyze_metric, results_to_dataframe
 from backend.analytics.sql_runner import run_sql_file
 from backend.app.db import get_database_url
+from backend.domains.commerce.investigation_config import commerce_investigation_config
 from backend.investigation.pipeline import run_investigation
 from backend.investigation.segments import build_segment_registry
 from backend.investigation.trajectory_attribution import _structural_features, reconstruct_trajectories
 from backend.analytics.stats.clustering import cluster_arrays
 from backend.llm.client import FAILURE_MECHANISMS
+
+_COMMERCE_CONFIG = commerce_investigation_config()
 
 pd.set_option("display.width", 220)
 pd.set_option("display.max_columns", 30)
@@ -108,7 +111,7 @@ def main() -> None:
     investigations = {}
     for lens_name, metric_name in [("abandonment", "abandonment_rate"), ("conversion", "conversion_rate"), ("constraint_satisfaction", "constraint_satisfaction_rate")]:
         t0 = time.time()
-        result = run_investigation(base_df, actions, labels, primary_metric_name=metric_name)
+        result = run_investigation(base_df, actions, labels, _COMMERCE_CONFIG, primary_metric_name=metric_name)
         timings[f"investigation_{lens_name}"] = time.time() - t0
         investigations[lens_name] = result
 
@@ -201,7 +204,11 @@ def main() -> None:
     scenario_by_session = ground_truth.set_index("session_id")["ground_truth_scenario"]
     for lens_name, result in investigations.items():
         for finding in result.findings:
-            seg = next(s for s in build_segment_registry() if s.label == finding.segment_label)
+            seg = next(
+                s
+                for s in build_segment_registry(_COMMERCE_CONFIG.dimension_values, _COMMERCE_CONFIG.pairwise_allowlist, _COMMERCE_CONFIG.pre_treatment_dimensions)
+                if s.label == finding.segment_label
+            )
             mask = seg.mask_fn(base_df)
             sids = base_df.loc[mask, "session_id"].astype(str)
             scenarios = scenario_by_session.reindex(sids).value_counts(normalize=True)

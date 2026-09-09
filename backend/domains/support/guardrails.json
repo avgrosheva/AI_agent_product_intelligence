@@ -1,0 +1,15 @@
+{
+  "guardrails": [
+    {
+      "name": "escalation_rate_guardrail",
+      "metric": "escalation_rate",
+      "column": "escalated",
+      "aggregation": "cluster_mean",
+      "kind": "absolute",
+      "direction": "increase_is_bad",
+      "threshold": 0.05,
+      "severity": "blocking",
+      "enabled": true
+    }
+  ]
+}

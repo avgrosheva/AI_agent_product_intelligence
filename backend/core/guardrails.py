@@ -28,7 +28,9 @@ import pandas as pd
 from backend.analytics.stats.clustering import cluster_arrays
 
 Aggregation = Literal["p95_raw", "cluster_mean"]
-Comparison = Literal["ratio", "absolute_increase"]
+ComparisonKind = Literal["ratio", "absolute"]
+Direction = Literal["increase_is_bad", "decrease_is_bad"]
+Severity = Literal["blocking", "warning"]
 
 
 @dataclass(frozen=True)
@@ -36,8 +38,19 @@ class GuardrailDefinition:
     name: str
     column: str
     aggregation: Aggregation
-    comparison: Comparison
     threshold: float
+    kind: ComparisonKind = "ratio"
+    direction: Direction = "increase_is_bad"
+    # Stage 4 (configurable guardrails): "metric" is the domain's own
+    # MetricDefinition.name this guardrail watches (purely descriptive —
+    # `column` is the actual analytics_base_df column evaluate_guardrails
+    # aggregates, which is not always identical to the metric name);
+    # "severity"/"enabled" let a domain register a guardrail that is
+    # reported but never blocks ship (severity="warning"), or turned off
+    # entirely without deleting its definition (enabled=False).
+    metric: str = ""
+    severity: Severity = "blocking"
+    enabled: bool = True
     dropna: bool = False
 
 
@@ -48,6 +61,7 @@ class GuardrailCheck:
     v2_value: float
     threshold_description: str
     breached: bool
+    severity: Severity = "blocking"
 
 
 @dataclass
@@ -56,7 +70,15 @@ class GuardrailReport:
 
     @property
     def any_breach(self) -> bool:
-        return any(c.breached for c in self.checks)
+        """Any BLOCKING guardrail breached — this is what
+        synthesize_recommendation's ship/hold rules gate on. A breached
+        severity="warning" guardrail is still reported here (see
+        any_warning_breach) but never forces hold on its own."""
+        return any(c.breached for c in self.checks if c.severity == "blocking")
+
+    @property
+    def any_warning_breach(self) -> bool:
+        return any(c.breached for c in self.checks if c.severity == "warning")
 
 
 def _aggregate(data: pd.DataFrame, column: str, aggregation: Aggregation) -> tuple[float, float]:
@@ -72,19 +94,25 @@ def _aggregate(data: pd.DataFrame, column: str, aggregation: Aggregation) -> tup
     raise ValueError(f"unknown aggregation: {aggregation!r}")
 
 
-def _compare(v1: float, v2: float, comparison: Comparison, threshold: float) -> tuple[bool, str]:
-    if comparison == "ratio":
+def _compare(v1: float, v2: float, kind: ComparisonKind, direction: Direction, threshold: float) -> tuple[bool, str]:
+    if kind == "ratio" and direction == "increase_is_bad":
         return bool(v2 > v1 * threshold), f"v2 > v1 x {threshold}"
-    if comparison == "absolute_increase":
+    if kind == "ratio" and direction == "decrease_is_bad":
+        return bool(v2 < v1 * threshold), f"v2 < v1 x {threshold}"
+    if kind == "absolute" and direction == "increase_is_bad":
         return bool(v2 > v1 + threshold), f"v2 > v1 + {threshold}"
-    raise ValueError(f"unknown comparison: {comparison!r}")
+    if kind == "absolute" and direction == "decrease_is_bad":
+        return bool(v2 < v1 - threshold), f"v2 < v1 - {threshold}"
+    raise ValueError(f"unknown (kind, direction): ({kind!r}, {direction!r})")
 
 
 def evaluate_guardrails(df: pd.DataFrame, definitions: list[GuardrailDefinition]) -> GuardrailReport:
     checks: list[GuardrailCheck] = []
     for gd in definitions:
+        if not gd.enabled:
+            continue
         data = df.dropna(subset=[gd.column]) if gd.dropna else df
         v1, v2 = _aggregate(data, gd.column, gd.aggregation)
-        breached, description = _compare(v1, v2, gd.comparison, gd.threshold)
-        checks.append(GuardrailCheck(gd.name, v1, v2, description, breached))
+        breached, description = _compare(v1, v2, gd.kind, gd.direction, gd.threshold)
+        checks.append(GuardrailCheck(gd.name, v1, v2, description, breached, severity=gd.severity))
     return GuardrailReport(checks=checks)

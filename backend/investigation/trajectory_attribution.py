@@ -31,27 +31,46 @@ def reconstruct_trajectories(agent_actions_df: pd.DataFrame) -> pd.DataFrame:
     return grouped.reset_index().rename(columns={"action_type": "action_sequence"})
 
 
-def _structural_features(seq: tuple[str, ...]) -> tuple[bool, int, bool, int]:
-    has_clarify = "clarify" in seq
-    num_search_repeats = sum(1 for a, b in zip(seq, seq[1:]) if a == "search" and b == "search")
-    ends_in_abandon = bool(seq) and seq[-1] == "abandon_flow"
+def _structural_features(
+    seq: tuple[str, ...],
+    clarify_action: str = "clarify",
+    repeat_action: str = "search",
+    terminal_negative_action: str = "abandon_flow",
+) -> tuple[bool, int, bool, int]:
+    """The three action-type literals are domain data (backend.core.
+    trajectory_config.TrajectoryConfig), defaulted to commerce's own
+    vocabulary so every pre-Stage-5 call site (which passes none) is
+    unchanged — a domain with its own registered mechanisms and its own
+    action-type vocabulary passes its own via
+    InvestigationConfig.trajectory_config instead (Stage 5 task 5)."""
+    has_clarify = clarify_action in seq
+    num_repeats = sum(1 for a, b in zip(seq, seq[1:]) if a == repeat_action and b == repeat_action)
+    ends_in_terminal_negative = bool(seq) and seq[-1] == terminal_negative_action
     num_actions = len(seq)
-    return (has_clarify, num_search_repeats, ends_in_abandon, num_actions)
+    return (has_clarify, num_repeats, ends_in_terminal_negative, num_actions)
 
 
-def canonicalize_patterns(trajectories_df: pd.DataFrame, min_count: int = RARE_SEQUENCE_MIN_COUNT) -> pd.DataFrame:
+def canonicalize_patterns(
+    trajectories_df: pd.DataFrame,
+    min_count: int = RARE_SEQUENCE_MIN_COUNT,
+    clarify_action: str = "clarify",
+    repeat_action: str = "search",
+    terminal_negative_action: str = "abandon_flow",
+) -> pd.DataFrame:
     """Sequences occurring at least `min_count` times within the scope
     passed in keep their literal identity; rarer ones collapse to a
     structural-feature key (INVESTIGATION.md SS5: has_clarify,
-    num_search_repeats, ends_in_abandon, num_actions) so a long tail of
+    num_repeats, ends_in_terminal_negative, num_actions) so a long tail of
     near-duplicate exact sequences doesn't fragment the analysis."""
     counts = trajectories_df["action_sequence"].value_counts()
 
     def pattern_for(seq: tuple[str, ...]) -> str:
         if counts[seq] >= min_count:
             return "exact:" + ">".join(seq)
-        has_clarify, num_search_repeats, ends_in_abandon, num_actions = _structural_features(seq)
-        return f"structural:clarify={has_clarify},search_repeats={num_search_repeats},ends_abandon={ends_in_abandon},n_actions={num_actions}"
+        has_clarify, num_repeats, ends_in_terminal_negative, num_actions = _structural_features(
+            seq, clarify_action=clarify_action, repeat_action=repeat_action, terminal_negative_action=terminal_negative_action
+        )
+        return f"structural:clarify={has_clarify},repeats={num_repeats},ends_negative={ends_in_terminal_negative},n_actions={num_actions}"
 
     out = trajectories_df.copy()
     out["pattern"] = out["action_sequence"].apply(pattern_for)

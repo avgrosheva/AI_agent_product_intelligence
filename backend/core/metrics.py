@@ -22,4 +22,17 @@ from __future__ import annotations
 
 from backend.analytics.metric_registry import MetricDefinition
 
-__all__ = ["MetricDefinition"]
+__all__ = ["MetricDefinition", "get_metric"]
+
+
+def get_metric(name: str, registry: list[MetricDefinition]) -> MetricDefinition:
+    """Stage 4: the domain-scoped version of
+    backend.analytics.metric_registry.get() — looks a metric up in
+    whichever registry the caller passed (a DomainAdapter's own
+    metric_definitions()), rather than the global commerce
+    METRIC_REGISTRY. metric_registry.get() itself now delegates here for
+    backward compatibility."""
+    for m in registry:
+        if m.name == name:
+            return m
+    raise KeyError(f"No metric registered as {name!r}")

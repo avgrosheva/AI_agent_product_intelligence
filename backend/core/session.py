@@ -71,3 +71,20 @@ class CoreExperiment(Protocol):
     experiment_id: str
     control_version: str
     treatment_version: str
+
+
+@dataclass(frozen=True)
+class GenericExperimentInfo:
+    """Stage 5: what DomainAdapter.list_experiments() returns — satisfies
+    CoreExperiment (Protocols allow extra attributes) plus the display
+    fields a generic /experiments listing needs. Both CommerceAdapter (its
+    own `experiments` table) and SupportAdapter (`ingested_experiments`,
+    already storing the same fields since Stage 3) build one of these from
+    their own backing table — this dataclass carries no domain data."""
+
+    experiment_id: str
+    name: str
+    control_version: str
+    treatment_version: str
+    start_date: str | None = None
+    end_date: str | None = None

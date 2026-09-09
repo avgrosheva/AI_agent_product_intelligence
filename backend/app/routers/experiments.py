@@ -16,7 +16,7 @@ from sqlalchemy import text
 from backend.analytics import metric_registry
 from backend.analytics.experiment_results import MetricResult, analyze_metric
 from backend.app.dependencies import get_base_df, get_engine, get_experiment_or_404
-from backend.app.schemas.common import MetricResultSchema, SemanticClass
+from backend.app.schemas.common import MetricResultSchema, SemanticClass, metric_result_to_schema
 from backend.app.schemas.experiments import (
     ExperimentDetail,
     ExperimentListResponse,
@@ -27,39 +27,14 @@ from backend.app.schemas.experiments import (
     GuardrailResponse,
     MetricTableResponse,
 )
-from backend.investigation.recommend import check_guardrails
+from backend.core.guardrails import evaluate_guardrails
+from backend.domains.commerce.guardrails import COMMERCE_GUARDRAILS
 
 router = APIRouter(tags=["experiments"])
 
 
 def _to_schema(result: MetricResult) -> MetricResultSchema:
-    return MetricResultSchema(
-        metric_name=result.metric_name,
-        segment=result.segment,
-        semantic_class=result.semantic_class,
-        is_inferential=result.p_value is not None or result.verdict != "insufficient_evidence",
-        n_sessions_v1=result.n_sessions_v1,
-        n_sessions_v2=result.n_sessions_v2,
-        session_value_v1=result.session_value_v1,
-        session_value_v2=result.session_value_v2,
-        n_users_v1=result.n_users_v1,
-        n_users_v2=result.n_users_v2,
-        cluster_mean_v1=result.cluster_mean_v1,
-        cluster_mean_v2=result.cluster_mean_v2,
-        event_count_v1=result.event_count_v1,
-        event_count_v2=result.event_count_v2,
-        non_event_count_v1=result.non_event_count_v1,
-        non_event_count_v2=result.non_event_count_v2,
-        test_name=result.test_name,
-        p_value=result.p_value,
-        effect_size_name=result.effect_size_name,
-        effect_size_value=result.effect_size_value,
-        ci_low=result.ci_low,
-        ci_high=result.ci_high,
-        ci_stat=result.ci_stat,
-        verdict=result.verdict,
-        notes=result.notes,
-    )
+    return metric_result_to_schema(result)
 
 
 @router.get("/experiments", response_model=ExperimentListResponse)
@@ -76,7 +51,7 @@ def list_experiments() -> ExperimentListResponse:
     for row in rows:
         scoped = get_base_df(experiment_id=row["experiment_id"])
         north_star = analyze_metric(scoped, metric_registry.get("conversion_rate"))
-        guardrails = check_guardrails(scoped)
+        guardrails = evaluate_guardrails(scoped, COMMERCE_GUARDRAILS)
         chip = _status_chip(north_star, guardrails.any_breach)
         summaries.append(
             ExperimentSummary(
@@ -190,7 +165,7 @@ def get_experiment_funnel(experiment_id: str) -> FunnelResponse:
 def get_experiment_guardrails(experiment_id: str) -> GuardrailResponse:
     get_experiment_or_404(experiment_id)
     base_df = get_base_df(experiment_id=experiment_id)
-    report = check_guardrails(base_df)
+    report = evaluate_guardrails(base_df, COMMERCE_GUARDRAILS)
     checks = [
         GuardrailCheckSchema(
             name=c.name, v1_value=c.v1_value, v2_value=c.v2_value,

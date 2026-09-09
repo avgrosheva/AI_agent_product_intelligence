@@ -77,6 +77,38 @@ def test_structural_features_capture_documented_dimensions():
     assert num_actions == 5
 
 
+def test_structural_features_use_configurable_action_literals():
+    """Stage 5 task 5: a domain with its own action-type vocabulary (never
+    'clarify'/'search'/'abandon_flow') gets the exact same structural
+    classification, just keyed to its own literals."""
+    seq = ("triage", "escalate", "escalate", "clarify_ticket", "close_unresolved")
+    has_clarify, num_repeats, ends_negative, num_actions = traj_module._structural_features(
+        seq, clarify_action="clarify_ticket", repeat_action="escalate", terminal_negative_action="close_unresolved"
+    )
+    assert has_clarify is True
+    assert num_repeats == 1
+    assert ends_negative is True
+    assert num_actions == 5
+
+    # The commerce vocabulary must NOT match this domain's sequence — proves
+    # the literals are actually being used, not silently falling back.
+    has_clarify_wrong, num_repeats_wrong, ends_negative_wrong, _ = traj_module._structural_features(seq)
+    assert has_clarify_wrong is False
+    assert num_repeats_wrong == 0
+    assert ends_negative_wrong is False
+
+
+def test_canonicalize_patterns_uses_configurable_action_literals():
+    rare = [("triage", "escalate", "escalate", "clarify_ticket", "close_unresolved")]
+    df = pd.DataFrame({"session_id": [0], "action_sequence": rare})
+    out = canonicalize_patterns(df, min_count=5, clarify_action="clarify_ticket", repeat_action="escalate", terminal_negative_action="close_unresolved")
+    pattern = out.iloc[0].pattern
+    assert pattern.startswith("structural:")
+    assert "clarify=True" in pattern
+    assert "repeats=1" in pattern
+    assert "ends_negative=True" in pattern
+
+
 def test_pattern_association_uses_fisher_exact_for_small_cells():
     df = pd.DataFrame(
         {
@@ -107,12 +139,20 @@ def test_pattern_association_reports_association_not_causation_in_field_names():
 
 
 def test_no_association_test_against_a_tautological_outcome_in_the_pipeline():
-    """Testing trajectory pattern vs `abandoned` is tautological when every
-    pattern in scope is a complete trajectory (its last action determines
-    the outcome). The pipeline must restrict association testing to
-    sessions that reached an answer and test against `converted` instead —
-    verified here structurally, since this is easy to silently regress."""
+    """Testing trajectory pattern vs the negative terminal outcome
+    (commerce: 'abandoned') is tautological when every pattern in scope is
+    a complete trajectory (its last action determines the outcome). The
+    pipeline must restrict association testing to sessions that reached an
+    answer and test against the domain's own positive_outcome_column
+    instead — verified here structurally, since this is easy to silently
+    regress. Stage 5 task 5: these were hardcoded literals
+    ("outcome"/"abandoned"/"converted"); they are now read from the active
+    domain's own TrajectoryConfig (backend.core.trajectory_config), never
+    hardcoded in the pipeline itself."""
     import backend.investigation.pipeline as pipeline_module
 
     source = inspect.getsource(pipeline_module.run_investigation)
-    assert 'outcome_col="converted"' in source
+    assert "tc.negative_outcome_value" in source
+    assert "outcome_col=tc.positive_outcome_column" in source
+    assert 'outcome_col="abandoned"' not in source
+    assert 'outcome_col="converted"' not in source
