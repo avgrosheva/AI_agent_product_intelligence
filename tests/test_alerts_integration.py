@@ -58,14 +58,14 @@ def _ingest_rollback_fixture(api_client, tag: str, support_project_id: str) -> s
     }
     resp = api_client.post("/api/v1/ingest/sessions", json=payload, params={"project_id": support_project_id})
     assert resp.status_code == 201
-    experiments = api_client.get("/api/v1/domains/support/experiments").json()["experiments"]
+    experiments = api_client.get(f"/api/v1/domains/support/experiments?project_id={support_project_id}").json()["experiments"]
     exp = next(e for e in experiments if e["name"] == f"Alert Test {tag}")
     return exp["experiment_id"]
 
 
 def test_rollback_evaluation_creates_a_critical_alert(api_client, support_project_id):
     exp_id = _ingest_rollback_fixture(api_client, "create", support_project_id)
-    eval_resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
+    eval_resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate&project_id={support_project_id}")
     assert eval_resp.status_code == 201
     assert eval_resp.json()["status"] == "ROLLBACK"
 
@@ -82,7 +82,7 @@ def test_rollback_evaluation_creates_a_critical_alert(api_client, support_projec
 def test_repeated_evaluation_does_not_duplicate_open_alerts(api_client, support_project_id):
     exp_id = _ingest_rollback_fixture(api_client, "dedup", support_project_id)
     for _ in range(3):
-        resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
+        resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate&project_id={support_project_id}")
         assert resp.status_code == 201
 
     alerts = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}").json()["alerts"]
@@ -92,7 +92,7 @@ def test_repeated_evaluation_does_not_duplicate_open_alerts(api_client, support_
 
 def test_acknowledging_an_alert_allows_a_new_one_after_the_next_evaluation(api_client, support_project_id):
     exp_id = _ingest_rollback_fixture(api_client, "reopen", support_project_id)
-    api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
+    api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate&project_id={support_project_id}")
     alerts = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}").json()["alerts"]
     rollback_alert = next(a for a in alerts if a["rule"] == "rollback")
 
@@ -104,7 +104,7 @@ def test_acknowledging_an_alert_allows_a_new_one_after_the_next_evaluation(api_c
 
     # The still-broken experiment gets evaluated again -> a NEW alert,
     # since the old one is no longer "open".
-    api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
+    api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate&project_id={support_project_id}")
     alerts_after = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}").json()["alerts"]
     rollback_alerts_after = [a for a in alerts_after if a["rule"] == "rollback"]
     assert len(rollback_alerts_after) == 2
@@ -119,7 +119,7 @@ def test_acknowledge_unknown_alert_is_404(api_client):
 
 def test_alerts_filterable_by_severity_and_status(api_client, support_project_id):
     exp_id = _ingest_rollback_fixture(api_client, "filter", support_project_id)
-    api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
+    api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate&project_id={support_project_id}")
 
     critical = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}&severity=critical").json()["alerts"]
     assert all(a["severity"] == "critical" for a in critical)

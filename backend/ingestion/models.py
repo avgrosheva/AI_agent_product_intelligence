@@ -50,7 +50,14 @@ class IngestedExperiment(Base):
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False)
 
-    __table_args__ = (UniqueConstraint("domain", "external_experiment_id", name="uq_ingested_experiments_domain_external_id"),)
+    # Stage 8 task 1: project_id is part of this uniqueness key (not just
+    # domain + external id) — two projects ingesting the same
+    # external_experiment_id under the same domain must get two separate
+    # rows, never overwrite each other's. Postgres treats NULL as distinct
+    # from any other NULL in a unique index, so legacy (project_id IS
+    # NULL) rows still don't collide with each other either — acceptable,
+    # since NULL rows are pre-Stage-7 data nothing new should be writing.
+    __table_args__ = (UniqueConstraint("project_id", "domain", "external_experiment_id", name="uq_ingested_experiments_project_domain_external_id"),)
 
 
 class IngestedSession(Base):
@@ -58,6 +65,11 @@ class IngestedSession(Base):
 
     session_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     domain: Mapped[str] = mapped_column(Text, nullable=False)
+    # Denormalized from the owning experiment purely so this table's own
+    # uniqueness constraint can be project-scoped without a join (Stage 8
+    # task 1) — sessions still belong to exactly one experiment via
+    # experiment_id below; this is not a second source of truth.
+    project_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     external_session_id: Mapped[str] = mapped_column(Text, nullable=False)
     experiment_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("ingested_experiments.experiment_id"), nullable=False, index=True)
     agent_version: Mapped[str] = mapped_column(Text, nullable=False)
@@ -68,7 +80,7 @@ class IngestedSession(Base):
     context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(nullable=False)
 
-    __table_args__ = (UniqueConstraint("domain", "external_session_id", name="uq_ingested_sessions_domain_external_id"),)
+    __table_args__ = (UniqueConstraint("project_id", "domain", "external_session_id", name="uq_ingested_sessions_project_domain_external_id"),)
 
 
 class IngestedMessage(Base):

@@ -1,10 +1,16 @@
 """Password hashing (bcrypt) and JWT issuing/verification (Stage 7 task 1).
 
 Production-plausible but deliberately minimal: HS256 JWTs signed with a
-secret from AIPI_JWT_SECRET (a fixed local-dev default is used if unset —
-fine for this portfolio deployment, called out explicitly in the Stage 7
-report as a blocker before a real deployment). No SSO, no refresh-token
-rotation, no session store — a bearer access token only, as scoped.
+secret from AIPI_JWT_SECRET. No SSO, no refresh-token rotation, no
+session store — a bearer access token only, as scoped.
+
+Stage 8 task 5: AIPI_ENV distinguishes "development"/"test" (the fixed
+dev secret below is accepted — nothing about local dev or the test suite
+sets AIPI_JWT_SECRET) from anything else (read: "production" or any
+environment name an operator chooses for a real deployment), where
+running with the fixed dev secret is refused at import time — a
+misconfigured deployment fails loudly on startup instead of silently
+issuing tokens anyone who has read this file's source could forge.
 """
 
 from __future__ import annotations
@@ -15,9 +21,20 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 import jwt
 
-JWT_SECRET = os.environ.get("AIPI_JWT_SECRET", "dev-only-insecure-secret-change-in-production")
+DEV_DEFAULT_JWT_SECRET = "dev-only-insecure-secret-change-in-production"
+_DEV_ENVIRONMENTS = {"development", "test"}
+
+ENV = os.environ.get("AIPI_ENV", "development")
+JWT_SECRET = os.environ.get("AIPI_JWT_SECRET", DEV_DEFAULT_JWT_SECRET)
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_TTL = timedelta(hours=24)
+
+if ENV not in _DEV_ENVIRONMENTS and JWT_SECRET == DEV_DEFAULT_JWT_SECRET:
+    raise RuntimeError(
+        f"AIPI_ENV={ENV!r} (outside {_DEV_ENVIRONMENTS}) requires AIPI_JWT_SECRET to be set to a "
+        "real secret — refusing to start with the fixed development JWT secret, which is "
+        "readable in this project's own source and would let anyone forge a valid token."
+    )
 
 
 def hash_password(password: str) -> str:

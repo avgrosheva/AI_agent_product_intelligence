@@ -19,7 +19,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.app.auth_deps import CurrentUser, get_current_user
-from backend.app.domain_registry import get_engine
+from backend.app.domain_registry import available_domains, get_engine
 from backend.auth.models import ROLE_RANK
 from backend.auth.service import get_membership, get_project
 from backend.ingestion.schemas import IngestBatchRequest, IngestionResponse
@@ -39,6 +39,13 @@ def ingest_sessions(
     re-posting the same batch — identical or corrected — converges to the
     same stored state rather than duplicating rows. No commerce-specific
     field is required anywhere in the request body."""
+    if request.domain not in available_domains():
+        # Stage 8 task 2: defensive even though a project can no longer be
+        # CREATED with an invalid domain — a pre-Stage-8 project, or the
+        # request body simply lying about its own domain, must not slip
+        # through on the strength of the project.domain match alone.
+        raise HTTPException(status_code=422, detail=f"Unknown domain '{request.domain}'. Available: {available_domains()}")
+
     engine = get_engine()
     project = get_project(engine, project_id)
     if project is None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.app.auth_deps import CurrentUser, get_current_user
-from backend.app.domain_registry import get_engine
+from backend.app.domain_registry import available_domains, get_engine
 from backend.app.schemas.auth import (
     AddMemberRequest,
     CreateOrganizationRequest,
@@ -114,5 +114,10 @@ def get_org_projects(org_id: str, user: CurrentUser = Depends(get_current_user))
 @router.post("/orgs/{org_id}/projects", response_model=ProjectSchema, status_code=201)
 def create_org_project(org_id: str, body: CreateProjectRequest, user: CurrentUser = Depends(get_current_user)) -> ProjectSchema:
     _require_org_role(org_id, user, "admin")
+    if body.domain not in available_domains():
+        # Stage 8 task 2: reject unknown domains outright — otherwise a
+        # typo'd domain silently creates an orphaned project with no
+        # adapter, invisible forever except by its raw database row.
+        raise HTTPException(status_code=422, detail=f"Unknown domain '{body.domain}'. Available: {available_domains()}")
     result = create_project(get_engine(), org_id, body.name, body.domain)
     return ProjectSchema(**result.__dict__)

@@ -140,10 +140,10 @@ def test_support_release_evaluation_has_null_value_fields_when_no_cost_data_inge
     }
     resp = api_client.post("/api/v1/ingest/sessions", json=payload, params={"project_id": support_project_id})
     assert resp.status_code == 201
-    experiments = api_client.get("/api/v1/domains/support/experiments").json()["experiments"]
+    experiments = api_client.get(f"/api/v1/domains/support/experiments?project_id={support_project_id}").json()["experiments"]
     exp_id = next(e["experiment_id"] for e in experiments if e["name"] == f"Econ Test {tag}")
 
-    eval_resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
+    eval_resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate&project_id={support_project_id}")
     assert eval_resp.status_code == 201
     economics = eval_resp.json()["economics"]
     assert economics is not None  # support DOES declare a config (success_column="resolved" always exists)

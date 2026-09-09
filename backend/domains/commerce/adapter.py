@@ -41,22 +41,47 @@ class CommerceAdapter:
         # analytics_base_df()/build_session_context(), which require a
         # real engine and will fail if called on one built this way.
         self._engine = engine
-        # Stage 7 task 2: accepted for interface symmetry with
-        # SupportAdapter, but a documented no-op here — commerce's own
-        # tables (sessions/experiments) have no project_id column and are
-        # not retrofitted with one; every "commerce" project shares the
-        # single underlying demo dataset. Isolation for this domain is
-        # membership-gated only (backend.app.auth_deps), not data-
-        # partitioned — see the Stage 7 report's blockers.
+        # Stage 8 task 3: real project scoping, not a membership-only gate
+        # (Stage 7's version of this adapter left this a documented no-op).
+        # experiments.project_id (backend/app/models/core.py) names which
+        # ONE project currently owns the single, un-duplicated demo
+        # dataset — see backend.domains.commerce.ownership.
+        # claim_commerce_dataset for how a project acquires it. A project
+        # that hasn't claimed the dataset simply sees zero experiments/
+        # sessions, the same shape as "no data yet," never an error and
+        # never someone else's rows.
         self._project_id = project_id
+
+    def _owned_experiment_ids(self) -> set[str]:
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT experiment_id::text AS experiment_id FROM experiments WHERE project_id = :pid"), {"pid": self._project_id}
+            ).scalars().all()
+        return set(rows)
 
     def analytics_base_df(self, experiment_id: str | None = None) -> pd.DataFrame:
         df = run_sql_file(self._engine, "session_level_base.sql")
-        if experiment_id is None:
-            return df
-        return df[df["experiment_id"].astype(str) == experiment_id]
+        if self._project_id is not None:
+            df = df[df["experiment_id"].astype(str).isin(self._owned_experiment_ids())]
+        if experiment_id is not None:
+            df = df[df["experiment_id"].astype(str) == experiment_id]
+        return df
 
     def build_session_context(self, session_id: str) -> SessionContext:
+        if self._project_id is not None:
+            with self._engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        "SELECT 1 FROM sessions s JOIN experiments e ON e.experiment_id = s.experiment_id "
+                        "WHERE s.session_id = :sid AND e.project_id = :pid"
+                    ),
+                    {"sid": session_id, "pid": self._project_id},
+                ).first()
+            if row is None:
+                # Cross-project lookup fails exactly like "doesn't exist" —
+                # matches SupportAdapter's build_session_context (Stage 7
+                # task 2: prevent cross-project access).
+                raise KeyError(f"no commerce session found for session_id={session_id!r}")
         contexts = build_all_contexts(self._engine, session_ids=[session_id])
         if not contexts:
             raise KeyError(f"no commerce session found for session_id={session_id!r}")
@@ -84,13 +109,17 @@ class CommerceAdapter:
         return NEXT_ACTION_TEMPLATES
 
     def list_experiments(self) -> list[GenericExperimentInfo]:
+        params: dict[str, str] = {}
+        query = (
+            "SELECT experiment_id::text AS experiment_id, name, control_version, treatment_version, "
+            "start_date::text AS start_date, end_date::text AS end_date FROM experiments"
+        )
+        if self._project_id is not None:
+            query += " WHERE project_id = :pid"
+            params["pid"] = self._project_id
+        query += " ORDER BY start_date"
         with self._engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT experiment_id::text AS experiment_id, name, control_version, treatment_version, "
-                    "start_date::text AS start_date, end_date::text AS end_date FROM experiments ORDER BY start_date"
-                )
-            ).mappings().all()
+            rows = conn.execute(text(query), params).mappings().all()
         return [
             GenericExperimentInfo(
                 experiment_id=r["experiment_id"], name=r["name"], control_version=r["control_version"],
@@ -102,9 +131,20 @@ class CommerceAdapter:
     def agent_actions_df(self, experiment_id: str | None = None) -> pd.DataFrame:
         query = "SELECT a.session_id, a.sequence_index, a.action_type::text AS action_type FROM agent_actions a"
         params: dict[str, str] = {}
+        needs_join = self._project_id is not None or experiment_id is not None
+        if needs_join:
+            query += " JOIN sessions s ON s.session_id = a.session_id"
+        if self._project_id is not None:
+            query += " JOIN experiments e ON e.experiment_id = s.experiment_id"
+        where = []
+        if self._project_id is not None:
+            where.append("e.project_id = :pid")
+            params["pid"] = self._project_id
         if experiment_id is not None:
-            query += " JOIN sessions s ON s.session_id = a.session_id WHERE s.experiment_id::text = :eid"
+            where.append("s.experiment_id::text = :eid")
             params["eid"] = experiment_id
+        if where:
+            query += " WHERE " + " AND ".join(where)
         with self._engine.connect() as conn:
             return pd.read_sql(text(query), conn, params=params)
 
@@ -135,9 +175,14 @@ class CommerceAdapter:
             "s.agent_version::text AS agent_version, sfa.failure_mode::text AS failure_mode, "
             "sfa.detector_source::text AS detector_source, sfa.confidence, sfa.evidence_text "
             "FROM session_failure_attributions sfa JOIN sessions s ON s.session_id = sfa.session_id "
-            "WHERE sfa.detected = true"
         )
+        if self._project_id is not None:
+            query += "JOIN experiments e ON e.experiment_id = s.experiment_id "
+        query += "WHERE sfa.detected = true"
         params: dict[str, str] = {}
+        if self._project_id is not None:
+            query += " AND e.project_id = :pid"
+            params["pid"] = self._project_id
         if experiment_id is not None:
             query += " AND s.experiment_id::text = :eid"
             params["eid"] = experiment_id

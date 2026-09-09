@@ -43,7 +43,7 @@ def _ingest_support_fixture(api_client, tag: str, support_project_id: str) -> st
 
     resp = api_client.post("/api/v1/ingest/sessions", json=_support_payload(SupportAdapter.domain, tag), params={"project_id": support_project_id})
     assert resp.status_code == 201
-    experiments = api_client.get("/api/v1/domains/support/experiments").json()["experiments"]
+    experiments = api_client.get(f"/api/v1/domains/support/experiments?project_id={support_project_id}").json()["experiments"]
     exp = next(e for e in experiments if e["name"] == f"Generic API Test {tag}")
     return exp["experiment_id"]
 
@@ -69,7 +69,7 @@ def test_generic_experiments_endpoint_on_commerce(api_client, experiment_id):
 
 def test_generic_experiments_endpoint_on_support(api_client, support_project_id):
     exp_id = _ingest_support_fixture(api_client, "list", support_project_id)
-    resp = api_client.get("/api/v1/domains/support/experiments")
+    resp = api_client.get(f"/api/v1/domains/support/experiments?project_id={support_project_id}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["domain"] == "support"
@@ -85,7 +85,7 @@ def test_generic_metrics_endpoint_on_commerce(api_client, experiment_id):
 
 def test_generic_metrics_endpoint_on_support(api_client, support_project_id):
     exp_id = _ingest_support_fixture(api_client, "metrics", support_project_id)
-    resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/metrics")
+    resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/metrics?project_id={support_project_id}")
     assert resp.status_code == 200
     metrics = resp.json()["metrics"]
     names = {m["metric_name"] for m in metrics}
@@ -103,7 +103,7 @@ def test_generic_guardrails_endpoint_on_commerce(api_client, experiment_id):
 
 def test_generic_guardrails_endpoint_on_support(api_client, support_project_id):
     exp_id = _ingest_support_fixture(api_client, "guardrails", support_project_id)
-    resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/guardrails")
+    resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/guardrails?project_id={support_project_id}")
     assert resp.status_code == 200
     body = resp.json()
     assert {c["name"] for c in body["checks"]} == {"escalation_rate_guardrail"}
@@ -130,7 +130,7 @@ def test_generic_investigation_endpoint_on_commerce(api_client, experiment_id):
 
 def test_generic_investigation_endpoint_on_support(api_client, support_project_id):
     exp_id = _ingest_support_fixture(api_client, "investigation", support_project_id)
-    resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/investigation?primary_metric=resolution_rate")
+    resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/investigation?primary_metric=resolution_rate&project_id={support_project_id}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["recommendation"]["verdict"] in {"ship", "hold", "roll_back"}
@@ -169,19 +169,19 @@ def test_generic_sessions_list_and_detail_on_support(api_client, support_project
     # project — sorted by started_at, so a differently-dated fixture from
     # another test could otherwise land in this page instead of this
     # test's own "triage_ticket" sessions.
-    resp = api_client.get(f"/api/v1/domains/support/sessions?experiment_id={exp_id}&limit=3")
+    resp = api_client.get(f"/api/v1/domains/support/sessions?experiment_id={exp_id}&limit=3&project_id={support_project_id}")
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["items"]) == 3
     sid = body["items"][0]["session_id"]
 
-    detail = api_client.get(f"/api/v1/domains/support/sessions/{sid}")
+    detail = api_client.get(f"/api/v1/domains/support/sessions/{sid}?project_id={support_project_id}")
     assert detail.status_code == 200
     d = detail.json()
     assert d["domain"] == "support"
     assert d["action_sequence"] == ["triage_ticket"]
 
 
-def test_generic_session_detail_404_for_unknown_id(api_client):
-    resp = api_client.get("/api/v1/domains/support/sessions/00000000-0000-0000-0000-000000000000")
+def test_generic_session_detail_404_for_unknown_id(api_client, support_project_id):
+    resp = api_client.get(f"/api/v1/domains/support/sessions/00000000-0000-0000-0000-000000000000?project_id={support_project_id}")
     assert resp.status_code == 404

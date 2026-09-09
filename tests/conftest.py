@@ -145,12 +145,18 @@ def test_identity(classified_engine) -> dict:
 
     from backend.auth.service import add_member, create_organization, create_project, register_user
     from backend.auth.security import create_access_token
+    from backend.domains.commerce.ownership import claim_commerce_dataset
 
     email = f"test-{_uuid.uuid4()}@example.com"
     user = register_user(classified_engine, email, "test-password-123")
     org = create_organization(classified_engine, "Test Org", user.user_id)
     commerce_project = create_project(classified_engine, org.org_id, "Commerce Project", "commerce")
     support_project = create_project(classified_engine, org.org_id, "Support Project", "support")
+    # Stage 8 task 3: commerce data isn't visible to a project until it
+    # explicitly claims it (never automatic on project creation, so that a
+    # SECOND commerce project created later — e.g. by an isolation test —
+    # never silently steals ownership away from this one).
+    claim_commerce_dataset(classified_engine, commerce_project.project_id)
     token = create_access_token(user.user_id)
     return {
         "user_id": user.user_id,

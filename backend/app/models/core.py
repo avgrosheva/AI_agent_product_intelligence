@@ -3,7 +3,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import ARRAY, Boolean, Date, Float, Integer, String
+from sqlalchemy import ARRAY, Boolean, Date, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,6 +57,12 @@ class Experiment(Base):
     __tablename__ = "experiments"
 
     experiment_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    # Stage 8 task 3: which project currently owns this (single, shared,
+    # never-duplicated) demo dataset — NULL until a project explicitly
+    # claims it (backend.domains.commerce.ownership.claim_commerce_dataset).
+    # A project whose id doesn't match this sees zero commerce experiments/
+    # sessions, never another project's data.
+    project_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     control_version: Mapped[str] = mapped_column(String(16), nullable=False)
     treatment_version: Mapped[str] = mapped_column(String(16), nullable=False)
