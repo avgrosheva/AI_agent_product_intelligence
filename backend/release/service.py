@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session as OrmSession
 from backend.analytics.experiment_results import analyze_all_metrics
 from backend.core.adapter import DomainAdapter
 from backend.core.investigation_config import investigation_config_from_adapter
+from backend.economics.compute import EconomicsResult, compute_economics
 from backend.investigation.pipeline import InvestigationResult, run_investigation
 from backend.release.models import ReleaseEvaluation
 
@@ -42,9 +43,11 @@ class ReleaseEvaluationResult:
     any_guardrail_breach: bool
     primary_reason: str
     next_action: str
+    project_id: str | None = None
     key_metrics: dict = field(default_factory=dict)
     breached_guardrails: list = field(default_factory=list)
     top_findings: list = field(default_factory=list)
+    economics: dict | None = None
 
 
 def _json_safe(value):
@@ -105,6 +108,22 @@ def _investigation_to_release_fields(result: InvestigationResult, all_metric_res
     }
 
 
+def _economics_to_dict(economics: EconomicsResult | None) -> dict | None:
+    if economics is None:
+        return None
+    return {
+        "cost_per_session_v1": _json_safe(economics.cost_per_session_v1),
+        "cost_per_session_v2": _json_safe(economics.cost_per_session_v2),
+        "cost_per_success_v1": _json_safe(economics.cost_per_success_v1),
+        "cost_per_success_v2": _json_safe(economics.cost_per_success_v2),
+        "estimated_incremental_cost_per_session": _json_safe(economics.estimated_incremental_cost_per_session),
+        "value_per_success_v1": _json_safe(economics.value_per_success_v1),
+        "value_per_success_v2": _json_safe(economics.value_per_success_v2),
+        "estimated_business_impact_per_session": _json_safe(economics.estimated_business_impact_per_session),
+        "notes": economics.notes,
+    }
+
+
 def evaluate_release(
     domain: str,
     experiment_id: str,
@@ -124,6 +143,7 @@ def evaluate_release(
     result = run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, config, primary_metric_name=primary_metric_name)
     all_metric_results = analyze_all_metrics(base_df, config.metric_registry, metric_value_columns=config.metric_value_columns)
     fields = _investigation_to_release_fields(result, all_metric_results)
+    fields["economics"] = _economics_to_dict(compute_economics(base_df, adapter.economics_config()))
     return result, fields
 
 
@@ -134,6 +154,7 @@ def persist_release_evaluation(
     primary_metric_name: str,
     result: InvestigationResult,
     fields: dict,
+    project_id: str | None = None,
 ) -> ReleaseEvaluationResult:
     evaluation_id = uuid.uuid4()
     evaluated_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -142,6 +163,7 @@ def persist_release_evaluation(
     row = ReleaseEvaluation(
         evaluation_id=evaluation_id,
         domain=domain,
+        project_id=project_id,
         experiment_id=experiment_id,
         primary_metric=primary_metric_name,
         status=status,
@@ -153,6 +175,7 @@ def persist_release_evaluation(
         key_metrics=fields["key_metrics"],
         breached_guardrails=fields["breached_guardrails"],
         top_findings=fields["top_findings"],
+        economics=fields.get("economics"),
     )
     with OrmSession(engine) as session:
         session.add(row)
@@ -161,6 +184,7 @@ def persist_release_evaluation(
     return ReleaseEvaluationResult(
         evaluation_id=str(evaluation_id),
         domain=domain,
+        project_id=project_id,
         experiment_id=experiment_id,
         primary_metric=primary_metric_name,
         status=status,
@@ -172,14 +196,15 @@ def persist_release_evaluation(
         key_metrics=fields["key_metrics"],
         breached_guardrails=fields["breached_guardrails"],
         top_findings=fields["top_findings"],
+        economics=fields.get("economics"),
     )
 
 
 def evaluate_and_persist_release(
-    engine: Engine, domain: str, experiment_id: str, adapter: DomainAdapter, primary_metric_name: str
+    engine: Engine, domain: str, experiment_id: str, adapter: DomainAdapter, primary_metric_name: str, project_id: str | None = None
 ) -> ReleaseEvaluationResult:
     result, fields = evaluate_release(domain, experiment_id, adapter, primary_metric_name)
-    persisted = persist_release_evaluation(engine, domain, experiment_id, primary_metric_name, result, fields)
+    persisted = persist_release_evaluation(engine, domain, experiment_id, primary_metric_name, result, fields, project_id=project_id)
 
     # Stage 6 task 1: alert generation runs synchronously right after
     # persistence, deterministically, from the same already-computed
@@ -187,39 +212,34 @@ def evaluate_and_persist_release(
     # engine a second time.
     from backend.alerts.service import generate_alerts_for_evaluation
 
-    generate_alerts_for_evaluation(engine, domain, experiment_id, persisted.evaluation_id, persisted.status, fields, primary_metric_name)
+    generate_alerts_for_evaluation(engine, domain, experiment_id, persisted.evaluation_id, persisted.status, fields, primary_metric_name, project_id=project_id)
 
     return persisted
 
 
 def _row_to_result(row) -> ReleaseEvaluationResult:
     return ReleaseEvaluationResult(
-        evaluation_id=str(row.evaluation_id), domain=row.domain, experiment_id=row.experiment_id,
+        evaluation_id=str(row.evaluation_id), domain=row.domain, project_id=row.project_id, experiment_id=row.experiment_id,
         primary_metric=row.primary_metric, status=row.status, evaluated_at=row.evaluated_at,
         has_negative_segment=row.has_negative_segment, any_guardrail_breach=row.any_guardrail_breach,
         primary_reason=row.primary_reason, next_action=row.next_action, key_metrics=row.key_metrics,
-        breached_guardrails=row.breached_guardrails, top_findings=row.top_findings,
+        breached_guardrails=row.breached_guardrails, top_findings=row.top_findings, economics=row.economics,
     )
 
 
-def get_latest_release_status(engine: Engine, domain: str, experiment_id: str) -> ReleaseEvaluationResult | None:
+def get_latest_release_status(engine: Engine, domain: str, experiment_id: str, project_id: str | None = None) -> ReleaseEvaluationResult | None:
     with OrmSession(engine) as session:
-        row = (
-            session.query(ReleaseEvaluation)
-            .filter(ReleaseEvaluation.domain == domain, ReleaseEvaluation.experiment_id == experiment_id)
-            .order_by(ReleaseEvaluation.evaluated_at.desc())
-            .first()
-        )
+        query = session.query(ReleaseEvaluation).filter(ReleaseEvaluation.domain == domain, ReleaseEvaluation.experiment_id == experiment_id)
+        if project_id is not None:
+            query = query.filter(ReleaseEvaluation.project_id == project_id)
+        row = query.order_by(ReleaseEvaluation.evaluated_at.desc()).first()
     return _row_to_result(row) if row is not None else None
 
 
-def list_release_history(engine: Engine, domain: str, experiment_id: str, limit: int = 20) -> list[ReleaseEvaluationResult]:
+def list_release_history(engine: Engine, domain: str, experiment_id: str, project_id: str | None = None, limit: int = 20) -> list[ReleaseEvaluationResult]:
     with OrmSession(engine) as session:
-        rows = (
-            session.query(ReleaseEvaluation)
-            .filter(ReleaseEvaluation.domain == domain, ReleaseEvaluation.experiment_id == experiment_id)
-            .order_by(ReleaseEvaluation.evaluated_at.desc())
-            .limit(limit)
-            .all()
-        )
+        query = session.query(ReleaseEvaluation).filter(ReleaseEvaluation.domain == domain, ReleaseEvaluation.experiment_id == experiment_id)
+        if project_id is not None:
+            query = query.filter(ReleaseEvaluation.project_id == project_id)
+        rows = query.order_by(ReleaseEvaluation.evaluated_at.desc()).limit(limit).all()
     return [_row_to_result(r) for r in rows]

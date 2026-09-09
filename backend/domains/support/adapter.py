@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from backend.core.attribution import MechanismRegistry, ReviewableAttribution
+from backend.economics.config import EconomicsConfig
 from backend.core.guardrails import GuardrailDefinition
 from backend.core.metrics import MetricDefinition
 from backend.core.next_actions import GENERIC_NEXT_ACTION_TEMPLATES
@@ -37,20 +38,34 @@ SEGMENT_DIMENSION_VALUES: dict[str, list[str]] = {
 class SupportAdapter:
     domain = DOMAIN
 
-    def __init__(self, engine: Engine):
+    def __init__(self, engine: Engine, project_id: str | None = None):
+        # Stage 7 task 2: when given, every query below is scoped to
+        # experiments that belong to this project (via a join to
+        # ingested_experiments.project_id) — the tenancy boundary for the
+        # ingestion-based domains, where project_id is a real, enforced
+        # column (unlike commerce's single shared dataset — see
+        # CommerceAdapter's own project_id parameter for why it's a no-op
+        # there).
         self._engine = engine
+        self._project_id = project_id
+
+    def _project_filter(self, params: dict, experiment_alias: str = "e") -> str:
+        if self._project_id is None:
+            return ""
+        params["project_id"] = self._project_id
+        return f" AND {experiment_alias}.project_id = :project_id"
 
     def analytics_base_df(self, experiment_id: str | None = None) -> pd.DataFrame:
         with self._engine.connect() as conn:
-            sessions = pd.read_sql(
-                text(
-                    "SELECT session_id, experiment_id, agent_version, external_user_id AS user_id, "
-                    "outcome_label, started_at, ended_at, context->>'ticket_category' AS ticket_category "
-                    "FROM ingested_sessions WHERE domain = :domain"
-                ),
-                conn,
-                params={"domain": self.domain},
+            params: dict[str, str] = {"domain": self.domain}
+            query = (
+                "SELECT s.session_id, s.experiment_id, s.agent_version, s.external_user_id AS user_id, "
+                "s.outcome_label, s.started_at, s.ended_at, s.context->>'ticket_category' AS ticket_category "
+                "FROM ingested_sessions s JOIN ingested_experiments e ON e.experiment_id = s.experiment_id "
+                "WHERE s.domain = :domain"
             )
+            query += self._project_filter(params)
+            sessions = pd.read_sql(text(query), conn, params=params)
             actions = pd.read_sql(
                 text(
                     "SELECT a.session_id, count(*) AS num_actions, coalesce(sum(a.latency_ms), 0) AS total_latency_ms "
@@ -126,10 +141,14 @@ class SupportAdapter:
     def build_session_context(self, session_id: str) -> GenericSessionContext:
         sid = uuid.UUID(session_id)
         with self._engine.connect() as conn:
-            session_row = conn.execute(
-                text("SELECT session_id, outcome_label FROM ingested_sessions WHERE session_id = :sid"), {"sid": sid}
-            ).mappings().first()
+            params: dict[str, object] = {"sid": sid}
+            query = "SELECT s.session_id, s.outcome_label FROM ingested_sessions s JOIN ingested_experiments e ON e.experiment_id = s.experiment_id WHERE s.session_id = :sid"
+            query += self._project_filter(params, experiment_alias="e")
+            session_row = conn.execute(text(query), params).mappings().first()
             if session_row is None:
+                # Cross-project lookup fails exactly like "doesn't exist" —
+                # never distinguishes "wrong project" from "no such
+                # session" (Stage 7 task 2: prevent cross-project access).
                 raise KeyError(f"no support session found for session_id={session_id!r}")
             messages = conn.execute(
                 text("SELECT sender, text FROM ingested_messages WHERE session_id = :sid ORDER BY turn_index"), {"sid": sid}
@@ -181,15 +200,16 @@ class SupportAdapter:
         return GENERIC_NEXT_ACTION_TEMPLATES
 
     def list_experiments(self) -> list[GenericExperimentInfo]:
+        params: dict[str, str] = {"domain": self.domain}
+        query = (
+            "SELECT experiment_id::text AS experiment_id, name, control_version, treatment_version, "
+            "start_date::text AS start_date, end_date::text AS end_date FROM ingested_experiments e "
+            "WHERE domain = :domain"
+        )
+        query += self._project_filter(params, experiment_alias="e")
+        query += " ORDER BY start_date"
         with self._engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT experiment_id::text AS experiment_id, name, control_version, treatment_version, "
-                    "start_date::text AS start_date, end_date::text AS end_date FROM ingested_experiments "
-                    "WHERE domain = :domain ORDER BY start_date"
-                ),
-                {"domain": self.domain},
-            ).mappings().all()
+            rows = conn.execute(text(query), params).mappings().all()
         return [
             GenericExperimentInfo(
                 experiment_id=r["experiment_id"], name=r["name"], control_version=r["control_version"],
@@ -199,11 +219,14 @@ class SupportAdapter:
         ]
 
     def agent_actions_df(self, experiment_id: str | None = None) -> pd.DataFrame:
+        params: dict[str, str] = {"domain": self.domain}
         query = (
             "SELECT a.session_id, a.sequence_index, a.action_type FROM ingested_actions a "
-            "JOIN ingested_sessions s ON s.session_id = a.session_id WHERE s.domain = :domain"
+            "JOIN ingested_sessions s ON s.session_id = a.session_id "
+            "JOIN ingested_experiments e ON e.experiment_id = s.experiment_id "
+            "WHERE s.domain = :domain"
         )
-        params: dict[str, str] = {"domain": self.domain}
+        query += self._project_filter(params, experiment_alias="e")
         if experiment_id is not None:
             query += " AND s.experiment_id::text = :eid"
             params["eid"] = experiment_id
@@ -233,3 +256,14 @@ class SupportAdapter:
         # No generic failure-attribution storage exists for this domain
         # (mechanisms() is empty — Stage 3 task 7): nothing to review.
         return []
+
+    def economics_config(self) -> EconomicsConfig:
+        # "resolved" is a real 0/1 column this adapter always produces.
+        # cost_usd/revenue_usd are declared optimistically — they are only
+        # ACTUALLY present in analytics_base_df() if a caller ingested a
+        # metric with that exact name (backend.ingestion; the metrics-long
+        # pivot in analytics_base_df() surfaces whatever names exist).
+        # backend.economics.compute.compute_economics checks column
+        # presence itself and returns null fields rather than raising when
+        # a particular batch didn't include them (Stage 7 task 6).
+        return EconomicsConfig(cost_column="cost_usd", success_column="resolved", value_column="revenue_usd")

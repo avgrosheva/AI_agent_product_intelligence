@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.app.routers import ai_quality, alerts, domains, experiments, ingestion, investigation, review, sessions
+from backend.app.routers import ai_quality, alerts, auth, domains, experiments, ingestion, investigation, review, sessions
 from backend.app.schemas.common import ErrorResponse
 from backend.app.warmup import run_startup_warmup
 
@@ -62,6 +62,7 @@ async def validation_exception_handler(request, exc: RequestValidationError) -> 
     )
 
 
+app.include_router(auth.router)
 app.include_router(experiments.router)
 app.include_router(investigation.router)
 app.include_router(sessions.router)

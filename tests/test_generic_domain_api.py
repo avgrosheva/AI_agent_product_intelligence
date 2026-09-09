@@ -38,10 +38,10 @@ def _support_payload(domain: str, tag: str) -> dict:
     }
 
 
-def _ingest_support_fixture(api_client, tag: str) -> str:
+def _ingest_support_fixture(api_client, tag: str, support_project_id: str) -> str:
     from backend.domains.support.adapter import SupportAdapter
 
-    resp = api_client.post("/api/v1/ingest/sessions", json=_support_payload(SupportAdapter.domain, tag))
+    resp = api_client.post("/api/v1/ingest/sessions", json=_support_payload(SupportAdapter.domain, tag), params={"project_id": support_project_id})
     assert resp.status_code == 201
     experiments = api_client.get("/api/v1/domains/support/experiments").json()["experiments"]
     exp = next(e for e in experiments if e["name"] == f"Generic API Test {tag}")
@@ -67,8 +67,8 @@ def test_generic_experiments_endpoint_on_commerce(api_client, experiment_id):
     assert any(e["experiment_id"] == experiment_id for e in body["experiments"])
 
 
-def test_generic_experiments_endpoint_on_support(api_client):
-    exp_id = _ingest_support_fixture(api_client, "list")
+def test_generic_experiments_endpoint_on_support(api_client, support_project_id):
+    exp_id = _ingest_support_fixture(api_client, "list", support_project_id)
     resp = api_client.get("/api/v1/domains/support/experiments")
     assert resp.status_code == 200
     body = resp.json()
@@ -83,8 +83,8 @@ def test_generic_metrics_endpoint_on_commerce(api_client, experiment_id):
     assert any(m["metric_name"] == "conversion_rate" for m in metrics)
 
 
-def test_generic_metrics_endpoint_on_support(api_client):
-    exp_id = _ingest_support_fixture(api_client, "metrics")
+def test_generic_metrics_endpoint_on_support(api_client, support_project_id):
+    exp_id = _ingest_support_fixture(api_client, "metrics", support_project_id)
     resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/metrics")
     assert resp.status_code == 200
     metrics = resp.json()["metrics"]
@@ -101,8 +101,8 @@ def test_generic_guardrails_endpoint_on_commerce(api_client, experiment_id):
     assert {c["name"] for c in body["checks"]} == {"p95_latency", "tool_error_rate", "cost_per_session"}
 
 
-def test_generic_guardrails_endpoint_on_support(api_client):
-    exp_id = _ingest_support_fixture(api_client, "guardrails")
+def test_generic_guardrails_endpoint_on_support(api_client, support_project_id):
+    exp_id = _ingest_support_fixture(api_client, "guardrails", support_project_id)
     resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/guardrails")
     assert resp.status_code == 200
     body = resp.json()
@@ -128,8 +128,8 @@ def test_generic_investigation_endpoint_on_commerce(api_client, experiment_id):
     assert body["primary_metric"] == "abandonment_rate"
 
 
-def test_generic_investigation_endpoint_on_support(api_client):
-    exp_id = _ingest_support_fixture(api_client, "investigation")
+def test_generic_investigation_endpoint_on_support(api_client, support_project_id):
+    exp_id = _ingest_support_fixture(api_client, "investigation", support_project_id)
     resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/investigation?primary_metric=resolution_rate")
     assert resp.status_code == 200
     body = resp.json()
@@ -161,9 +161,15 @@ def test_generic_sessions_list_on_commerce(api_client, experiment_id):
     assert body["items"][0]["agent_version"] in ("v1", "v2")
 
 
-def test_generic_sessions_list_and_detail_on_support(api_client):
-    _ingest_support_fixture(api_client, "sessions")
-    resp = api_client.get("/api/v1/domains/support/sessions?limit=3")
+def test_generic_sessions_list_and_detail_on_support(api_client, support_project_id):
+    exp_id = _ingest_support_fixture(api_client, "sessions", support_project_id)
+    # Scoped to this test's own experiment: other tests sharing the same
+    # support_project_id (one project per domain, by design) also ingest
+    # sessions there, and an unscoped list spans every experiment in the
+    # project — sorted by started_at, so a differently-dated fixture from
+    # another test could otherwise land in this page instead of this
+    # test's own "triage_ticket" sessions.
+    resp = api_client.get(f"/api/v1/domains/support/sessions?experiment_id={exp_id}&limit=3")
     assert resp.status_code == 200
     body = resp.json()
     assert len(body["items"]) == 3

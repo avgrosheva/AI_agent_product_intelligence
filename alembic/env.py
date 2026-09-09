@@ -9,6 +9,7 @@ import backend.ingestion.models  # noqa: F401 -- registers the generic ingestion
 import backend.release.models  # noqa: F401 -- registers the release-evaluation history table onto Base.metadata for autogenerate
 import backend.alerts.models  # noqa: F401 -- registers the alerts table onto Base.metadata for autogenerate
 import backend.review.models  # noqa: F401 -- registers the attribution_reviews table onto Base.metadata for autogenerate
+import backend.auth.models  # noqa: F401 -- registers users/organizations/memberships/projects onto Base.metadata for autogenerate
 
 config = context.config
 

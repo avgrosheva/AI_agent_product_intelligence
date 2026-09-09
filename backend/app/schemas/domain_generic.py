@@ -138,6 +138,8 @@ class ReleaseEvaluationSchema(BaseModel):
     key_metrics: dict
     breached_guardrails: list
     top_findings: list
+    project_id: str | None = None
+    economics: dict | None = None
 
 
 class ReleaseHistoryResponse(BaseModel):

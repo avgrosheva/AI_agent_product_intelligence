@@ -5,9 +5,10 @@ finding), and the mandatory classifier evaluation report with provenance.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
+from backend.app.auth_deps import CurrentUser, get_current_user
 from backend.app.dependencies import get_agent_actions_df, get_base_df, get_engine, get_experiment_or_404
 from backend.app.schemas.ai_quality import (
     AIQualitySummaryResponse,
@@ -32,7 +33,7 @@ def _classifier_provenance() -> ClassifierProvenance:
 
 
 @router.get("/experiments/{experiment_id}/ai-quality", response_model=AIQualitySummaryResponse)
-def get_ai_quality_summary(experiment_id: str) -> AIQualitySummaryResponse:
+def get_ai_quality_summary(experiment_id: str, user: CurrentUser = Depends(get_current_user)) -> AIQualitySummaryResponse:
     get_experiment_or_404(experiment_id)
     base_df = get_base_df(experiment_id=experiment_id)
 
@@ -114,7 +115,7 @@ def get_ai_quality_summary(experiment_id: str) -> AIQualitySummaryResponse:
 
 
 @router.get("/ai-quality/classifier-evaluation", response_model=ClassifierEvaluationResponse)
-def get_classifier_evaluation() -> ClassifierEvaluationResponse:
+def get_classifier_evaluation(user: CurrentUser = Depends(get_current_user)) -> ClassifierEvaluationResponse:
     """Mandatory offline evaluation report (AI_EVALUATION.md SS5). Reads
     only the pre-computed summary scripts/evaluate_classifier.py writes —
     this endpoint never touches validation_ground_truth.parquet itself."""

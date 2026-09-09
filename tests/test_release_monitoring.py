@@ -7,7 +7,7 @@ stage (task 6)."""
 from __future__ import annotations
 
 
-def _ingest_support_release_fixture(api_client, tag: str) -> str:
+def _ingest_support_release_fixture(api_client, tag: str, support_project_id: str) -> str:
     from backend.domains.support.adapter import SupportAdapter
 
     def session(sid: str, version: str, category: str, outcome: str, handle_time: float, csat) -> dict:
@@ -53,18 +53,18 @@ def _ingest_support_release_fixture(api_client, tag: str) -> str:
         "experiments": [{"external_experiment_id": f"release-exp-{tag}", "name": f"Release Test {tag}", "control_version": "v1", "treatment_version": "v2"}],
         "sessions": sessions,
     }
-    resp = api_client.post("/api/v1/ingest/sessions", json=payload)
+    resp = api_client.post("/api/v1/ingest/sessions", json=payload, params={"project_id": support_project_id})
     assert resp.status_code == 201
     experiments = api_client.get("/api/v1/domains/support/experiments").json()["experiments"]
     exp = next(e for e in experiments if e["name"] == f"Release Test {tag}")
     return exp["experiment_id"]
 
 
-def test_support_release_evaluation_ships(api_client):
+def test_support_release_evaluation_ships(api_client, support_project_id):
     """Stage 5 task 6: support's planted resolution-rate improvement with
     a guardrail-safe escalation trade-off still resolves to SHIP, unchanged
     by adding release persistence around the same Investigation engine."""
-    exp_id = _ingest_support_release_fixture(api_client, "ship")
+    exp_id = _ingest_support_release_fixture(api_client, "ship", support_project_id)
     resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
     assert resp.status_code == 201
     body = resp.json()
@@ -87,8 +87,8 @@ def test_commerce_release_evaluation_holds(api_client, experiment_id):
     assert body["status"] == "HOLD"
 
 
-def test_release_evaluation_is_persisted_and_status_matches(api_client):
-    exp_id = _ingest_support_release_fixture(api_client, "persist")
+def test_release_evaluation_is_persisted_and_status_matches(api_client, support_project_id):
+    exp_id = _ingest_support_release_fixture(api_client, "persist", support_project_id)
     create_resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
     assert create_resp.status_code == 201
     created = create_resp.json()
@@ -100,8 +100,8 @@ def test_release_evaluation_is_persisted_and_status_matches(api_client):
     assert latest["status"] == created["status"]
 
 
-def test_release_history_accumulates_across_calls(api_client):
-    exp_id = _ingest_support_release_fixture(api_client, "history")
+def test_release_history_accumulates_across_calls(api_client, support_project_id):
+    exp_id = _ingest_support_release_fixture(api_client, "history", support_project_id)
     for _ in range(3):
         resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
         assert resp.status_code == 201
@@ -115,18 +115,18 @@ def test_release_history_accumulates_across_calls(api_client):
     assert timestamps == sorted(timestamps, reverse=True)
 
 
-def test_release_status_404_before_any_evaluation(api_client):
-    exp_id = _ingest_support_release_fixture(api_client, "no_eval_yet")
+def test_release_status_404_before_any_evaluation(api_client, support_project_id):
+    exp_id = _ingest_support_release_fixture(api_client, "no_eval_yet", support_project_id)
     resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/release-status")
     assert resp.status_code == 404
 
 
-def test_release_evaluation_decision_is_deterministic(api_client):
+def test_release_evaluation_decision_is_deterministic(api_client, support_project_id):
     """Same data evaluated twice must produce the exact same status and
     the same set of breached guardrails — no randomness in the decision
     itself (the underlying stats already guarantee this; this test proves
     the release-monitoring wrapper doesn't introduce any)."""
-    exp_id = _ingest_support_release_fixture(api_client, "deterministic")
+    exp_id = _ingest_support_release_fixture(api_client, "deterministic", support_project_id)
     first = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate").json()
     second = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate").json()
 
@@ -142,8 +142,8 @@ def test_release_evaluation_404_for_unknown_experiment(api_client):
     assert resp.status_code == 404
 
 
-def test_release_evaluation_422_for_unknown_metric(api_client):
-    exp_id = _ingest_support_release_fixture(api_client, "bad_metric")
+def test_release_evaluation_422_for_unknown_metric(api_client, support_project_id):
+    exp_id = _ingest_support_release_fixture(api_client, "bad_metric", support_project_id)
     resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=not_a_metric")
     assert resp.status_code == 422
 

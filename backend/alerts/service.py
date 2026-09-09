@@ -33,24 +33,25 @@ class AlertResult:
     status: str
     created_at: datetime
     acknowledged_at: datetime | None = None
+    project_id: str | None = None
 
 
 def _row_to_result(row: Alert) -> AlertResult:
     return AlertResult(
-        alert_id=str(row.alert_id), domain=row.domain, experiment_id=row.experiment_id, evaluation_id=row.evaluation_id,
+        alert_id=str(row.alert_id), domain=row.domain, project_id=row.project_id, experiment_id=row.experiment_id, evaluation_id=row.evaluation_id,
         rule=row.rule, severity=row.severity, reason=row.reason, related_guardrail=row.related_guardrail,
         related_finding=row.related_finding, status=row.status, created_at=row.created_at, acknowledged_at=row.acknowledged_at,
     )
 
 
 def generate_alerts_for_evaluation(
-    engine: Engine, domain: str, experiment_id: str, evaluation_id: str, status: str, fields: dict, primary_metric: str
+    engine: Engine, domain: str, experiment_id: str, evaluation_id: str, status: str, fields: dict, primary_metric: str, project_id: str | None = None
 ) -> list[AlertResult]:
     """Called right after a release evaluation is persisted
     (backend.release.service.evaluate_and_persist_release). Deterministic:
     the same (status, fields) always produces the same candidate alerts;
     only which of those are actually INSERTed depends on what's already
-    open (dedup)."""
+    open (dedup, scoped to the same project — Stage 7 task 2)."""
     candidates = evaluate_alert_rules(status, fields, primary_metric)
     if not candidates:
         return []
@@ -62,6 +63,7 @@ def generate_alerts_for_evaluation(
             existing_open = session.execute(
                 select(Alert).where(
                     Alert.domain == domain,
+                    Alert.project_id == project_id,
                     Alert.experiment_id == experiment_id,
                     Alert.rule == candidate.rule,
                     Alert.related_guardrail == candidate.related_guardrail,
@@ -73,7 +75,7 @@ def generate_alerts_for_evaluation(
                 continue  # dedup: an open alert already covers this exact condition
 
             row = Alert(
-                alert_id=uuid.uuid4(), domain=domain, experiment_id=experiment_id, evaluation_id=evaluation_id,
+                alert_id=uuid.uuid4(), domain=domain, project_id=project_id, experiment_id=experiment_id, evaluation_id=evaluation_id,
                 rule=candidate.rule, severity=candidate.severity, reason=candidate.reason,
                 related_guardrail=candidate.related_guardrail, related_finding=candidate.related_finding,
                 status="open", created_at=now, acknowledged_at=None,
@@ -88,6 +90,7 @@ def generate_alerts_for_evaluation(
 def list_alerts(
     engine: Engine,
     domain: str | None = None,
+    project_id: str | None = None,
     experiment_id: str | None = None,
     status: str | None = None,
     severity: str | None = None,
@@ -97,6 +100,8 @@ def list_alerts(
         stmt = select(Alert)
         if domain is not None:
             stmt = stmt.where(Alert.domain == domain)
+        if project_id is not None:
+            stmt = stmt.where(Alert.project_id == project_id)
         if experiment_id is not None:
             stmt = stmt.where(Alert.experiment_id == experiment_id)
         if status is not None:
@@ -108,17 +113,26 @@ def list_alerts(
     return [_row_to_result(r) for r in rows]
 
 
-def get_alert(engine: Engine, alert_id: str) -> AlertResult | None:
+def get_alert(engine: Engine, alert_id: str, project_id: str | None = None) -> AlertResult | None:
+    """`project_id`, when given, enforces tenant isolation at the service
+    layer (Stage 7 task 2) — a caller cannot fetch an alert belonging to a
+    different project by id even if they know it."""
     with OrmSession(engine) as session:
         row = session.get(Alert, uuid.UUID(alert_id))
-    return _row_to_result(row) if row is not None else None
+    if row is None:
+        return None
+    if project_id is not None and row.project_id != project_id:
+        return None
+    return _row_to_result(row)
 
 
-def acknowledge_alert(engine: Engine, alert_id: str) -> AlertResult | None:
+def acknowledge_alert(engine: Engine, alert_id: str, project_id: str | None = None) -> AlertResult | None:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     with OrmSession(engine) as session:
         row = session.get(Alert, uuid.UUID(alert_id))
         if row is None:
+            return None
+        if project_id is not None and row.project_id != project_id:
             return None
         if row.status == "open":
             row.status = "acknowledged"

@@ -24,7 +24,7 @@ def _clean_alerts_table(db_engine):
     yield
 
 
-def _ingest_rollback_fixture(api_client, tag: str) -> str:
+def _ingest_rollback_fixture(api_client, tag: str, support_project_id: str) -> str:
     from backend.domains.support.adapter import SupportAdapter
 
     def session(sid: str, version: str, outcome: str) -> dict:
@@ -56,20 +56,20 @@ def _ingest_rollback_fixture(api_client, tag: str) -> str:
         "experiments": [{"external_experiment_id": f"alert-exp-{tag}", "name": f"Alert Test {tag}", "control_version": "v1", "treatment_version": "v2"}],
         "sessions": sessions,
     }
-    resp = api_client.post("/api/v1/ingest/sessions", json=payload)
+    resp = api_client.post("/api/v1/ingest/sessions", json=payload, params={"project_id": support_project_id})
     assert resp.status_code == 201
     experiments = api_client.get("/api/v1/domains/support/experiments").json()["experiments"]
     exp = next(e for e in experiments if e["name"] == f"Alert Test {tag}")
     return exp["experiment_id"]
 
 
-def test_rollback_evaluation_creates_a_critical_alert(api_client):
-    exp_id = _ingest_rollback_fixture(api_client, "create")
+def test_rollback_evaluation_creates_a_critical_alert(api_client, support_project_id):
+    exp_id = _ingest_rollback_fixture(api_client, "create", support_project_id)
     eval_resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
     assert eval_resp.status_code == 201
     assert eval_resp.json()["status"] == "ROLLBACK"
 
-    alerts_resp = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}")
+    alerts_resp = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}")
     assert alerts_resp.status_code == 200
     alerts = alerts_resp.json()["alerts"]
     rollback_alerts = [a for a in alerts if a["rule"] == "rollback"]
@@ -79,21 +79,21 @@ def test_rollback_evaluation_creates_a_critical_alert(api_client):
     assert rollback_alerts[0]["acknowledged_at"] is None
 
 
-def test_repeated_evaluation_does_not_duplicate_open_alerts(api_client):
-    exp_id = _ingest_rollback_fixture(api_client, "dedup")
+def test_repeated_evaluation_does_not_duplicate_open_alerts(api_client, support_project_id):
+    exp_id = _ingest_rollback_fixture(api_client, "dedup", support_project_id)
     for _ in range(3):
         resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
         assert resp.status_code == 201
 
-    alerts = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}").json()["alerts"]
+    alerts = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}").json()["alerts"]
     rollback_alerts = [a for a in alerts if a["rule"] == "rollback"]
     assert len(rollback_alerts) == 1  # not 3
 
 
-def test_acknowledging_an_alert_allows_a_new_one_after_the_next_evaluation(api_client):
-    exp_id = _ingest_rollback_fixture(api_client, "reopen")
+def test_acknowledging_an_alert_allows_a_new_one_after_the_next_evaluation(api_client, support_project_id):
+    exp_id = _ingest_rollback_fixture(api_client, "reopen", support_project_id)
     api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
-    alerts = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}").json()["alerts"]
+    alerts = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}").json()["alerts"]
     rollback_alert = next(a for a in alerts if a["rule"] == "rollback")
 
     ack_resp = api_client.post(f"/api/v1/alerts/{rollback_alert['alert_id']}/acknowledge")
@@ -105,7 +105,7 @@ def test_acknowledging_an_alert_allows_a_new_one_after_the_next_evaluation(api_c
     # The still-broken experiment gets evaluated again -> a NEW alert,
     # since the old one is no longer "open".
     api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
-    alerts_after = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}").json()["alerts"]
+    alerts_after = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}").json()["alerts"]
     rollback_alerts_after = [a for a in alerts_after if a["rule"] == "rollback"]
     assert len(rollback_alerts_after) == 2
     assert sum(1 for a in rollback_alerts_after if a["status"] == "open") == 1
@@ -117,26 +117,26 @@ def test_acknowledge_unknown_alert_is_404(api_client):
     assert resp.status_code == 404
 
 
-def test_alerts_filterable_by_severity_and_status(api_client):
-    exp_id = _ingest_rollback_fixture(api_client, "filter")
+def test_alerts_filterable_by_severity_and_status(api_client, support_project_id):
+    exp_id = _ingest_rollback_fixture(api_client, "filter", support_project_id)
     api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate")
 
-    critical = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&severity=critical").json()["alerts"]
+    critical = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}&severity=critical").json()["alerts"]
     assert all(a["severity"] == "critical" for a in critical)
     assert len(critical) >= 1
 
-    open_only = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&status=open").json()["alerts"]
+    open_only = api_client.get(f"/api/v1/alerts?domain=support&experiment_id={exp_id}&project_id={support_project_id}&status=open").json()["alerts"]
     assert all(a["status"] == "open" for a in open_only)
 
 
-def test_commerce_release_evaluation_also_flows_through_alerts(api_client, experiment_id):
+def test_commerce_release_evaluation_also_flows_through_alerts(api_client, experiment_id, commerce_project_id):
     """Compatibility (task 7): the same alert pipeline works for commerce,
     not just support — whatever verdict the dev-scale dataset produces,
     the call must not error, and any resulting alert must carry
     domain='commerce'."""
     resp = api_client.post(f"/api/v1/domains/commerce/experiments/{experiment_id}/release-evaluations?primary_metric=abandonment_rate")
     assert resp.status_code == 201
-    alerts = api_client.get(f"/api/v1/alerts?domain=commerce&experiment_id={experiment_id}").json()["alerts"]
+    alerts = api_client.get(f"/api/v1/alerts?domain=commerce&experiment_id={experiment_id}&project_id={commerce_project_id}").json()["alerts"]
     assert all(a["domain"] == "commerce" for a in alerts)
 
 

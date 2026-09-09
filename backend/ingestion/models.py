@@ -36,6 +36,12 @@ class IngestedExperiment(Base):
 
     experiment_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     domain: Mapped[str] = mapped_column(Text, nullable=False)
+    # Stage 7 task 2: which project this experiment's data belongs to —
+    # nullable because it predates Stage 7 (pre-existing ingested rows have
+    # no project), but every NEW ingest request is required to supply one
+    # (backend.ingestion.service.ingest_batch); project-scoped reads treat
+    # NULL as "not visible to any project."
+    project_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     external_experiment_id: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     control_version: Mapped[str] = mapped_column(Text, nullable=False)

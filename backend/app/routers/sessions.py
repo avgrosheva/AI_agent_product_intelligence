@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 
+from backend.app.auth_deps import CurrentUser, get_current_user
 from backend.app.dependencies import get_base_df, get_engine
 from backend.app.schemas.common import ClassifierProvenance
 from backend.app.schemas.sessions import (
@@ -48,6 +49,7 @@ def list_sessions(
     failure_mode: str | None = None,
     limit: int = Query(default=50, le=500),
     offset: int = Query(default=0, ge=0),
+    user: CurrentUser = Depends(get_current_user),
 ) -> SessionListResponse:
     df = get_base_df(experiment_id=experiment_id)
 
@@ -114,7 +116,7 @@ def _classifier_provenance() -> ClassifierProvenance:
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
-def get_session_detail(session_id: str) -> SessionDetailResponse:
+def get_session_detail(session_id: str, user: CurrentUser = Depends(get_current_user)) -> SessionDetailResponse:
     try:
         sid = uuid.UUID(session_id)
     except ValueError:

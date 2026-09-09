@@ -51,7 +51,7 @@ def test_support_domain_has_no_registered_mechanisms(db_engine):
     assert adapter.mechanisms().all_names == ()
 
 
-def test_support_domain_end_to_end_ingest_compare_guardrail(api_client, db_engine):
+def test_support_domain_end_to_end_ingest_compare_guardrail(api_client, db_engine, support_project_id):
     # SupportAdapter.domain is the fixed string "support" (analytics_base_df
     # filters ingested_sessions by it) — the payload must be ingested under
     # that same domain. Tests run against the isolated per-session test
@@ -61,7 +61,7 @@ def test_support_domain_end_to_end_ingest_compare_guardrail(api_client, db_engin
     # must scope to its own experiment (adapter.list_experiments(), added
     # Stage 5) like every other support-domain test now does.
     domain = SupportAdapter.domain
-    resp = api_client.post("/api/v1/ingest/sessions", json=_support_payload(domain))
+    resp = api_client.post("/api/v1/ingest/sessions", json=_support_payload(domain), params={"project_id": support_project_id})
     assert resp.status_code == 201
     assert resp.json()["sessions_ingested"] == 24
 
@@ -69,7 +69,7 @@ def test_support_domain_end_to_end_ingest_compare_guardrail(api_client, db_engin
 
     from backend.app.db import get_database_url
 
-    adapter = SupportAdapter(create_engine(get_database_url()))
+    adapter = SupportAdapter(create_engine(get_database_url()), project_id=support_project_id)
     exp = next(e for e in adapter.list_experiments() if e.name == "Support Test")
     base_df = adapter.analytics_base_df(experiment_id=exp.experiment_id)
     assert len(base_df) == 24

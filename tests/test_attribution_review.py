@@ -182,26 +182,62 @@ def test_support_domain_review_queue_is_empty_no_mechanisms_registered(api_clien
     assert resp.json()["items"] == []
 
 
-def test_review_submission_works_for_support_domain_even_with_no_underlying_queue_data():
+def test_review_submission_is_domain_parametrized_and_still_validated_for_support():
     """Compatibility (task 7): the review API itself is domain-parametrized
-    (it never assumes commerce's storage) — submitting a review for a
-    support session round-trips correctly even though support has no
-    detector storage of its own to populate the queue from."""
+    (it never assumes commerce's storage) — but Stage 7 task 4's reference
+    validation applies uniformly, so a support-domain review (support has
+    zero registered mechanisms — Stage 3 task 7) correctly REJECTS any
+    mechanism name, rather than silently accepting a fake one the way a
+    domain-specific shortcut might."""
     from sqlalchemy import create_engine
 
     from backend.app.db import get_database_url
-    from backend.review.service import get_reviews_for_session, submit_review
+    from backend.domains.support.adapter import SupportAdapter
+    from backend.review.service import ReviewValidationError, submit_review
 
     engine = create_engine(get_database_url())
-    result = submit_review(engine, "support", "some-support-session-id", "hypothetical_mode", decision="confirmed", note="test")
-    assert result.decision == "confirmed"
-    fetched = get_reviews_for_session(engine, "support", "some-support-session-id")
-    assert fetched["hypothetical_mode"].decision == "confirmed"
+    adapter = SupportAdapter(engine)
+    with pytest.raises(ReviewValidationError):
+        submit_review(engine, "support", "some-support-session-id", "hypothetical_mode", decision="confirmed", adapter=adapter, note="test")
 
 
 def test_submit_review_rejects_invalid_decision(api_client, db_engine):
     session_id, failure_mode = _one_detected_commerce_attribution(db_engine)
     resp = api_client.post(
         f"/api/v1/domains/commerce/sessions/{session_id}/attributions/{failure_mode}/review", json={"decision": "maybe"}
+    )
+    assert resp.status_code == 422
+
+
+def test_submit_review_rejects_unregistered_mechanism(api_client, db_engine):
+    """Stage 7 task 4: failure_mode must be one of the domain's registered
+    mechanisms — a made-up name is rejected, not silently stored."""
+    session_id, _ = _one_detected_commerce_attribution(db_engine, index=7)
+    resp = api_client.post(
+        f"/api/v1/domains/commerce/sessions/{session_id}/attributions/not_a_real_mechanism/review",
+        json={"decision": "confirmed"},
+    )
+    assert resp.status_code == 422
+
+
+def test_submit_review_rejects_fake_session_id(api_client, db_engine):
+    """Stage 7 task 4: even a registered mechanism name must actually have
+    been DETECTED for the given session — a session that never had this
+    mechanism fire (or a session that doesn't exist) is rejected."""
+    _, failure_mode = _one_detected_commerce_attribution(db_engine, index=8)
+    resp = api_client.post(
+        f"/api/v1/domains/commerce/sessions/00000000-0000-0000-0000-000000000000/attributions/{failure_mode}/review",
+        json={"decision": "confirmed"},
+    )
+    assert resp.status_code == 422
+
+
+def test_submit_review_rejects_unregistered_corrected_mechanism(api_client, db_engine):
+    """Stage 7 task 4: corrected_mechanism, when given, must also be a
+    registered mechanism — not an arbitrary string."""
+    session_id, failure_mode = _one_detected_commerce_attribution(db_engine, index=9)
+    resp = api_client.post(
+        f"/api/v1/domains/commerce/sessions/{session_id}/attributions/{failure_mode}/review",
+        json={"decision": "rejected", "corrected_mechanism": "not_a_real_mechanism_either"},
     )
     assert resp.status_code == 422

@@ -23,6 +23,7 @@ from typing import Protocol
 import pandas as pd
 
 from backend.core.attribution import MechanismRegistry, ReviewableAttribution
+from backend.economics.config import EconomicsConfig
 from backend.core.guardrails import GuardrailDefinition
 from backend.core.metrics import MetricDefinition
 from backend.core.session import CoreSessionContext, GenericExperimentInfo
@@ -113,4 +114,12 @@ class DomainAdapter(Protocol):
         analyst could review, optionally scoped to one experiment and/or
         one session. May be empty for a domain with no attribution storage
         (support — no mechanisms registered, nothing to review)."""
+        ...
+
+    def economics_config(self) -> EconomicsConfig | None:
+        """Stage 7 tasks 5-6: which analytics_base_df columns hold this
+        domain's cost/success/value data. None if this domain has no
+        economics concept configured at all — backend.economics.compute.
+        compute_economics then returns None outright rather than a
+        result full of nulls."""
         ...

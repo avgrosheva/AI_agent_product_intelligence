@@ -13,8 +13,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from backend.app.auth_deps import CurrentUser, get_current_user
 from backend.app.dependencies import get_agent_actions_df, get_base_df, get_experiment_or_404, get_failure_attributions_wide_df
 from backend.app.investigation_serialization import finding_to_schema
 from backend.app.routers.experiments import _to_schema
@@ -50,6 +51,7 @@ def _run_investigation_cached(experiment_id: str, lens: InvestigationLens):
 def get_investigation(
     experiment_id: str,
     lens: InvestigationLens = Query(..., description="Required: exactly one pre-registered analytical lens. No default — the caller must choose."),
+    user: CurrentUser = Depends(get_current_user),
 ) -> InvestigationResponse:
     get_experiment_or_404(experiment_id)
     lens_meta = LENS_METADATA[lens]

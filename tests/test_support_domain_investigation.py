@@ -53,13 +53,13 @@ def _support_investigation_payload(domain: str) -> dict:
     }
 
 
-def test_support_domain_full_investigation_pipeline_runs_end_to_end(api_client, db_engine):
+def test_support_domain_full_investigation_pipeline_runs_end_to_end(api_client, db_engine, support_project_id):
     domain = SupportAdapter.domain
-    resp = api_client.post("/api/v1/ingest/sessions", json=_support_investigation_payload(domain))
+    resp = api_client.post("/api/v1/ingest/sessions", json=_support_investigation_payload(domain), params={"project_id": support_project_id})
     assert resp.status_code == 201
 
     engine = create_engine(get_database_url())
-    adapter = SupportAdapter(engine)
+    adapter = SupportAdapter(engine, project_id=support_project_id)
     config = investigation_config_from_adapter(adapter)
 
     # Scope to this test's own experiment: other tests in the same pytest

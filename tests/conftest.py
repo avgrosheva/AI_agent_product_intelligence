@@ -130,17 +130,69 @@ def classified_engine(db_engine):
 
 
 @pytest.fixture(scope="session")
-def api_client(classified_engine):
+def test_identity(classified_engine) -> dict:
+    """Stage 7: one default user, in one organization, with an admin
+    membership and exactly one project per domain ("commerce" and
+    "support") — the identity api_client authenticates as. Exactly one
+    project per domain is required for every pre-Stage-7 test's implicit
+    project resolution (backend.app.auth_deps.get_project_context) to
+    stay unambiguous. A fresh, random email every session avoids
+    colliding with a previous `pytest` invocation's leftover user in the
+    same persistent test database (platform_users has no FK cascade from
+    the dev-dataset reload, same reason alerts/attribution_reviews needed
+    their own cleanup fixtures)."""
+    import uuid as _uuid
+
+    from backend.auth.service import add_member, create_organization, create_project, register_user
+    from backend.auth.security import create_access_token
+
+    email = f"test-{_uuid.uuid4()}@example.com"
+    user = register_user(classified_engine, email, "test-password-123")
+    org = create_organization(classified_engine, "Test Org", user.user_id)
+    commerce_project = create_project(classified_engine, org.org_id, "Commerce Project", "commerce")
+    support_project = create_project(classified_engine, org.org_id, "Support Project", "support")
+    token = create_access_token(user.user_id)
+    return {
+        "user_id": user.user_id,
+        "email": email,
+        "token": token,
+        "org_id": org.org_id,
+        "commerce_project_id": commerce_project.project_id,
+        "support_project_id": support_project.project_id,
+    }
+
+
+@pytest.fixture(scope="session")
+def api_client(classified_engine, test_identity):
     """FastAPI TestClient against the classified dev database. The app's
     own get_engine() (backend.app.dependencies) connects independently to
     the same Postgres instance via the same DATABASE_URL — this fixture
-    only guarantees the data (including classifications) exists first."""
+    only guarantees the data (including classifications) exists first.
+
+    Stage 7: authenticated by default as test_identity's admin user (the
+    highest role, so every pre-Stage-7 test — written before auth existed
+    and asserting on business behavior, not permissions — keeps working
+    unchanged). Tests that specifically exercise role permissions
+    (tests/test_rbac.py) issue their own tokens for lower-role members
+    instead of using this fixture's default header.
+    """
     from fastapi.testclient import TestClient
 
     from backend.app.main import app
 
     with TestClient(app) as client:
+        client.headers["Authorization"] = f"Bearer {test_identity['token']}"
         yield client
+
+
+@pytest.fixture(scope="session")
+def support_project_id(test_identity) -> str:
+    return test_identity["support_project_id"]
+
+
+@pytest.fixture(scope="session")
+def commerce_project_id(test_identity) -> str:
+    return test_identity["commerce_project_id"]
 
 
 @pytest.fixture(scope="session")

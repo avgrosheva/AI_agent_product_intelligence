@@ -44,8 +44,8 @@ def available_domains() -> list[str]:
     return sorted(_ADAPTER_CLASSES)
 
 
-def get_adapter(domain: str) -> DomainAdapter:
+def get_adapter(domain: str, project_id: str | None = None) -> DomainAdapter:
     adapter_cls = _ADAPTER_CLASSES.get(domain)
     if adapter_cls is None:
         raise HTTPException(status_code=404, detail=f"Unknown domain '{domain}'. Available: {available_domains()}")
-    return adapter_cls(get_engine())
+    return adapter_cls(get_engine(), project_id=project_id)

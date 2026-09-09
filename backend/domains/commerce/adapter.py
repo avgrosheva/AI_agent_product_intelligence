@@ -18,6 +18,7 @@ from backend.analytics import metric_registry
 from backend.analytics.sql_runner import run_sql_file
 from backend.core.attribution import MechanismRegistry, ReviewableAttribution
 from backend.core.guardrails import GuardrailDefinition
+from backend.economics.config import EconomicsConfig
 from backend.core.metrics import MetricDefinition
 from backend.core.session import GenericExperimentInfo
 from backend.core.trajectory_config import TrajectoryConfig
@@ -33,13 +34,21 @@ from backend.llm.context_builder import build_all_contexts
 class CommerceAdapter:
     domain = "commerce"
 
-    def __init__(self, engine: Engine | None = None):
+    def __init__(self, engine: Engine | None = None, project_id: str | None = None):
         # engine may be None when the adapter is only used for its
         # declarative methods (metric/guardrail/segment/mechanism config) —
         # e.g. building an InvestigationConfig — never for
         # analytics_base_df()/build_session_context(), which require a
         # real engine and will fail if called on one built this way.
         self._engine = engine
+        # Stage 7 task 2: accepted for interface symmetry with
+        # SupportAdapter, but a documented no-op here — commerce's own
+        # tables (sessions/experiments) have no project_id column and are
+        # not retrofitted with one; every "commerce" project shares the
+        # single underlying demo dataset. Isolation for this domain is
+        # membership-gated only (backend.app.auth_deps), not data-
+        # partitioned — see the Stage 7 report's blockers.
+        self._project_id = project_id
 
     def analytics_base_df(self, experiment_id: str | None = None) -> pd.DataFrame:
         df = run_sql_file(self._engine, "session_level_base.sql")
@@ -116,6 +125,9 @@ class CommerceAdapter:
             outcome_column="outcome", negative_outcome_value="abandoned", positive_outcome_column="converted",
             clarify_action="clarify", repeat_action="search", terminal_negative_action="abandon_flow",
         )
+
+    def economics_config(self) -> EconomicsConfig:
+        return EconomicsConfig(cost_column="total_cost_usd", success_column="converted", value_column="revenue_usd")
 
     def list_reviewable_attributions(self, experiment_id: str | None = None, session_id: str | None = None) -> list[ReviewableAttribution]:
         query = (

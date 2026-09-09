@@ -16,6 +16,7 @@ class ReviewRequest(BaseModel):
 class ReviewSchema(BaseModel):
     review_id: str
     domain: str
+    project_id: str | None = None
     session_id: str
     failure_mode: str
     decision: Literal["confirmed", "rejected"]
@@ -41,6 +42,7 @@ class ReviewQueueItemSchema(BaseModel):
     confidence: float | None
     evidence_text: str | None
     reviewed: bool
+    high_impact: bool = False
 
 
 class ReviewQueueResponse(BaseModel):

@@ -20,6 +20,7 @@ class Alert(Base):
 
     alert_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     domain: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    project_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)  # Stage 7 task 2
     experiment_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     evaluation_id: Mapped[str] = mapped_column(Text, nullable=False)
     rule: Mapped[str] = mapped_column(Text, nullable=False)  # "rollback" | "blocking_guardrail_breach" | "hold_negative_segment"

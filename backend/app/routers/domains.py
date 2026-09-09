@@ -10,13 +10,20 @@ ai_quality.py) already use, just without a commerce default baked in.
 Mounted under /api/v1/domains/{domain}/... so it cannot collide with the
 existing commerce-only routes (which stay exactly as they were — Stage 5
 task 6: commerce behavior unchanged).
+
+Stage 7 tasks 2-3: every endpoint now requires authentication AND
+resolves a ProjectContext (backend.app.auth_deps) — the caller's project
+for this domain, checked against their organization membership — so a
+DomainAdapter here is always built bound to that project_id. Mutating
+endpoints additionally require the "analyst" role or higher.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.analytics.experiment_results import analyze_all_metrics
+from backend.app.auth_deps import CurrentUser, ProjectContext, get_current_user, get_project_context, require_role
 from backend.app.domain_registry import available_domains, get_adapter, get_engine
 from backend.app.investigation_serialization import finding_to_schema
 from backend.app.schemas.common import metric_result_to_schema
@@ -48,10 +55,6 @@ from backend.review.service import get_reviews_for_session
 router = APIRouter(prefix="/api/v1/domains", tags=["generic-domain-api"])
 
 
-def _resolve_adapter(domain: str) -> DomainAdapter:
-    return get_adapter(domain)
-
-
 def _experiment_or_404(adapter: DomainAdapter, experiment_id: str) -> GenericExperimentSummary:
     for exp in adapter.list_experiments():
         if exp.experiment_id == experiment_id:
@@ -72,13 +75,13 @@ def _validate_primary_metric(adapter: DomainAdapter, primary_metric: str) -> Non
 
 
 @router.get("", response_model=list[str])
-def list_domains() -> list[str]:
+def list_domains(user: CurrentUser = Depends(get_current_user)) -> list[str]:
     return available_domains()
 
 
 @router.get("/{domain}/experiments", response_model=GenericExperimentListResponse)
-def list_domain_experiments(domain: str) -> GenericExperimentListResponse:
-    adapter = _resolve_adapter(domain)
+def list_domain_experiments(domain: str, ctx: ProjectContext = Depends(get_project_context)) -> GenericExperimentListResponse:
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
     experiments = [
         GenericExperimentSummary(
             experiment_id=e.experiment_id, name=e.name, control_version=e.control_version,
@@ -90,8 +93,8 @@ def list_domain_experiments(domain: str) -> GenericExperimentListResponse:
 
 
 @router.get("/{domain}/experiments/{experiment_id}/metrics", response_model=GenericMetricTableResponse)
-def get_domain_metrics(domain: str, experiment_id: str) -> GenericMetricTableResponse:
-    adapter = _resolve_adapter(domain)
+def get_domain_metrics(domain: str, experiment_id: str, ctx: ProjectContext = Depends(get_project_context)) -> GenericMetricTableResponse:
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
     _experiment_or_404(adapter, experiment_id)
     base_df = adapter.analytics_base_df(experiment_id=experiment_id)
     results = analyze_all_metrics(base_df, adapter.metric_definitions(), metric_value_columns=adapter.metric_value_columns())
@@ -99,8 +102,8 @@ def get_domain_metrics(domain: str, experiment_id: str) -> GenericMetricTableRes
 
 
 @router.get("/{domain}/experiments/{experiment_id}/guardrails", response_model=GenericGuardrailResponse)
-def get_domain_guardrails(domain: str, experiment_id: str) -> GenericGuardrailResponse:
-    adapter = _resolve_adapter(domain)
+def get_domain_guardrails(domain: str, experiment_id: str, ctx: ProjectContext = Depends(get_project_context)) -> GenericGuardrailResponse:
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
     _experiment_or_404(adapter, experiment_id)
     base_df = adapter.analytics_base_df(experiment_id=experiment_id)
     definitions = adapter.guardrails()
@@ -121,8 +124,9 @@ def get_domain_investigation(
     domain: str,
     experiment_id: str,
     primary_metric: str = Query(..., description="Required: one of this domain's implemented, inferential metrics. No default."),
+    ctx: ProjectContext = Depends(get_project_context),
 ) -> GenericInvestigationResponse:
-    adapter = _resolve_adapter(domain)
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
     _experiment_or_404(adapter, experiment_id)
     _validate_primary_metric(adapter, primary_metric)
 
@@ -171,8 +175,8 @@ def get_domain_investigation(
 
 
 @router.get("/{domain}/mechanisms", response_model=MechanismListResponse)
-def get_domain_mechanisms(domain: str) -> MechanismListResponse:
-    adapter = _resolve_adapter(domain)
+def get_domain_mechanisms(domain: str, ctx: ProjectContext = Depends(get_project_context)) -> MechanismListResponse:
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
     mechanisms = [MechanismSchema(name=m.name, source=m.source, description=m.description) for m in adapter.mechanisms()]
     return MechanismListResponse(domain=domain, mechanisms=mechanisms)
 
@@ -184,8 +188,9 @@ def list_domain_sessions(
     agent_version: str | None = None,
     limit: int = Query(default=50, le=500),
     offset: int = Query(default=0, ge=0),
+    ctx: ProjectContext = Depends(get_project_context),
 ) -> GenericSessionListResponse:
-    adapter = _resolve_adapter(domain)
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
     df = adapter.analytics_base_df(experiment_id=experiment_id)
     if agent_version is not None:
         df = df[df["agent_version"] == agent_version]
@@ -208,15 +213,15 @@ def list_domain_sessions(
 
 
 @router.get("/{domain}/sessions/{session_id}", response_model=GenericSessionDetailResponse)
-def get_domain_session_detail(domain: str, session_id: str) -> GenericSessionDetailResponse:
-    adapter = _resolve_adapter(domain)
+def get_domain_session_detail(domain: str, session_id: str, ctx: ProjectContext = Depends(get_project_context)) -> GenericSessionDetailResponse:
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
     try:
-        ctx = adapter.build_session_context(session_id)
+        ctx_session = adapter.build_session_context(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"No session with id '{session_id}' in domain '{domain}'")
 
     attributions = adapter.list_reviewable_attributions(session_id=session_id)
-    reviews_by_mode = get_reviews_for_session(get_engine(), domain, session_id)
+    reviews_by_mode = get_reviews_for_session(get_engine(), domain, session_id, project_id=ctx.project.project_id)
     failure_attributions = [
         GenericFailureAttributionSchema(
             failure_mode=a.failure_mode, detector_source=a.detector_source, confidence=a.confidence, evidence_text=a.evidence_text,
@@ -229,11 +234,11 @@ def get_domain_session_detail(domain: str, session_id: str) -> GenericSessionDet
 
     return GenericSessionDetailResponse(
         domain=domain,
-        session_id=str(ctx.session_id),
-        outcome=ctx.outcome,
-        transcript=[[sender, text] for sender, text in ctx.transcript],
-        action_sequence=list(ctx.action_sequence),
-        tool_calls=[GenericToolCallSchema(tool_name=tc.tool_name, success=tc.success, error_type=tc.error_type) for tc in ctx.tool_calls],
+        session_id=str(ctx_session.session_id),
+        outcome=ctx_session.outcome,
+        transcript=[[sender, text] for sender, text in ctx_session.transcript],
+        action_sequence=list(ctx_session.action_sequence),
+        tool_calls=[GenericToolCallSchema(tool_name=tc.tool_name, success=tc.success, error_type=tc.error_type) for tc in ctx_session.tool_calls],
         failure_attributions=failure_attributions,
     )
 
@@ -243,30 +248,31 @@ def create_release_evaluation(
     domain: str,
     experiment_id: str,
     primary_metric: str = Query(..., description="Required: one of this domain's implemented, inferential metrics."),
+    ctx: ProjectContext = Depends(require_role("analyst")),
 ) -> ReleaseEvaluationSchema:
     """Stage 5 task 4: evaluate this experiment RIGHT NOW (no scheduling)
     and persist the result — every call appends a new release_evaluations
     row, so calling this repeatedly builds the release history task 3
-    asks for."""
-    adapter = _resolve_adapter(domain)
+    asks for. Stage 7 task 3: requires "analyst" role or higher."""
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
     _experiment_or_404(adapter, experiment_id)
     _validate_primary_metric(adapter, primary_metric)
 
-    result = evaluate_and_persist_release(get_engine(), domain, experiment_id, adapter, primary_metric)
+    result = evaluate_and_persist_release(get_engine(), domain, experiment_id, adapter, primary_metric, project_id=ctx.project.project_id)
     return ReleaseEvaluationSchema(**result.__dict__)
 
 
 @router.get("/{domain}/experiments/{experiment_id}/release-status", response_model=ReleaseEvaluationSchema)
-def get_release_status(domain: str, experiment_id: str) -> ReleaseEvaluationSchema:
-    _resolve_adapter(domain)  # 404s on an unknown domain even with no evaluations yet
-    result = get_latest_release_status(get_engine(), domain, experiment_id)
+def get_release_status(domain: str, experiment_id: str, ctx: ProjectContext = Depends(get_project_context)) -> ReleaseEvaluationSchema:
+    result = get_latest_release_status(get_engine(), domain, experiment_id, project_id=ctx.project.project_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"No release evaluation has been run yet for domain='{domain}' experiment_id='{experiment_id}'")
     return ReleaseEvaluationSchema(**result.__dict__)
 
 
 @router.get("/{domain}/experiments/{experiment_id}/release-history", response_model=ReleaseHistoryResponse)
-def get_release_history(domain: str, experiment_id: str, limit: int = Query(default=20, le=100)) -> ReleaseHistoryResponse:
-    _resolve_adapter(domain)
-    results = list_release_history(get_engine(), domain, experiment_id, limit=limit)
+def get_release_history(
+    domain: str, experiment_id: str, limit: int = Query(default=20, le=100), ctx: ProjectContext = Depends(get_project_context)
+) -> ReleaseHistoryResponse:
+    results = list_release_history(get_engine(), domain, experiment_id, project_id=ctx.project.project_id, limit=limit)
     return ReleaseHistoryResponse(domain=domain, experiment_id=experiment_id, evaluations=[ReleaseEvaluationSchema(**r.__dict__) for r in results])

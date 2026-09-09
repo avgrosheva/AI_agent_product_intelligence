@@ -10,11 +10,12 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 
 from backend.analytics import metric_registry
 from backend.analytics.experiment_results import MetricResult, analyze_metric
+from backend.app.auth_deps import CurrentUser, get_current_user
 from backend.app.dependencies import get_base_df, get_engine, get_experiment_or_404
 from backend.app.schemas.common import MetricResultSchema, SemanticClass, metric_result_to_schema
 from backend.app.schemas.experiments import (
@@ -38,7 +39,7 @@ def _to_schema(result: MetricResult) -> MetricResultSchema:
 
 
 @router.get("/experiments", response_model=ExperimentListResponse)
-def list_experiments() -> ExperimentListResponse:
+def list_experiments(user: CurrentUser = Depends(get_current_user)) -> ExperimentListResponse:
     with get_engine().connect() as conn:
         rows = conn.execute(
             text(
@@ -80,7 +81,7 @@ def _status_chip(north_star: MetricResult, any_guardrail_breach: bool) -> Litera
 
 
 @router.get("/experiments/{experiment_id}", response_model=ExperimentDetail)
-def get_experiment(experiment_id: str) -> ExperimentDetail:
+def get_experiment(experiment_id: str, user: CurrentUser = Depends(get_current_user)) -> ExperimentDetail:
     exp = get_experiment_or_404(experiment_id)
     base_df = get_base_df(experiment_id=experiment_id)
     v1 = base_df[base_df.agent_version == "v1"]
@@ -120,6 +121,7 @@ def _get_full_metric_table_cached(experiment_id: str):
 def get_experiment_metrics(
     experiment_id: str,
     semantic_class: SemanticClass | None = Query(default=None, description="Filter to one semantic class, e.g. economic_outcome"),
+    user: CurrentUser = Depends(get_current_user),
 ) -> MetricTableResponse:
     get_experiment_or_404(experiment_id)
     results = _get_full_metric_table_cached(experiment_id)
@@ -129,7 +131,7 @@ def get_experiment_metrics(
 
 
 @router.get("/experiments/{experiment_id}/funnel", response_model=FunnelResponse)
-def get_experiment_funnel(experiment_id: str) -> FunnelResponse:
+def get_experiment_funnel(experiment_id: str, user: CurrentUser = Depends(get_current_user)) -> FunnelResponse:
     """Computed from the already experiment-scoped session_level_base
     frame (its had_impression/had_click/had_cart/had_purchase columns are
     exactly 02_funnel_by_version.sql's logic) rather than re-running that
@@ -162,7 +164,7 @@ def get_experiment_funnel(experiment_id: str) -> FunnelResponse:
 
 
 @router.get("/experiments/{experiment_id}/guardrails", response_model=GuardrailResponse)
-def get_experiment_guardrails(experiment_id: str) -> GuardrailResponse:
+def get_experiment_guardrails(experiment_id: str, user: CurrentUser = Depends(get_current_user)) -> GuardrailResponse:
     get_experiment_or_404(experiment_id)
     base_df = get_base_df(experiment_id=experiment_id)
     report = evaluate_guardrails(base_df, COMMERCE_GUARDRAILS)

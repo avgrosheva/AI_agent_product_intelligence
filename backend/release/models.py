@@ -29,6 +29,9 @@ class ReleaseEvaluation(Base):
 
     evaluation_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     domain: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    # Stage 7 task 2: the tenancy boundary this evaluation belongs to.
+    # Nullable for the same reason as ingested_experiments.project_id.
+    project_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     # Text, not a UUID FK: experiment_id may come from either commerce's
     # `experiments` table or the generic `ingested_experiments` table
     # depending on domain, and this log must not depend on which.
@@ -43,3 +46,8 @@ class ReleaseEvaluation(Base):
     key_metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)
     breached_guardrails: Mapped[list] = mapped_column(JSONB, nullable=False)
     top_findings: Mapped[list] = mapped_column(JSONB, nullable=False)
+    # Stage 7 tasks 5-6: null (the whole object) when the domain declares
+    # no economics config at all; individual fields inside are also each
+    # independently nullable when their underlying data is unavailable —
+    # see backend.economics.
+    economics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

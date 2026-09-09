@@ -22,6 +22,7 @@ class AttributionReview(Base):
 
     review_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     domain: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    project_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)  # Stage 7 task 2
     session_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     failure_mode: Mapped[str] = mapped_column(Text, nullable=False)
     decision: Mapped[str] = mapped_column(Text, nullable=False)  # "confirmed" | "rejected"
@@ -31,4 +32,4 @@ class AttributionReview(Base):
     created_at: Mapped[datetime] = mapped_column(nullable=False)
     updated_at: Mapped[datetime] = mapped_column(nullable=False)
 
-    __table_args__ = (UniqueConstraint("domain", "session_id", "failure_mode", name="uq_attribution_reviews_domain_session_mode"),)
+    __table_args__ = (UniqueConstraint("domain", "project_id", "session_id", "failure_mode", name="uq_attribution_reviews_domain_project_session_mode"),)

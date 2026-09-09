@@ -78,7 +78,11 @@ def _validate_experiment_references(engine: Engine, request: IngestBatchRequest)
         raise IngestionValidationError(errors)
 
 
-def ingest_batch(engine: Engine, request: IngestBatchRequest) -> IngestionResponse:
+def ingest_batch(engine: Engine, request: IngestBatchRequest, project_id: str | None = None) -> IngestionResponse:
+    """`project_id` (Stage 7 task 2) is supplied by the caller (the
+    authenticated API layer, resolved from the caller's own project
+    membership — never trusted from the request body itself) and stamped
+    onto every experiment this batch touches, scoping it to that tenant."""
     _validate_experiment_references(engine, request)
 
     domain = request.domain
@@ -88,6 +92,7 @@ def ingest_batch(engine: Engine, request: IngestBatchRequest) -> IngestionRespon
         {
             "experiment_id": _id(domain, "experiment", e.external_experiment_id),
             "domain": domain,
+            "project_id": project_id,
             "external_experiment_id": e.external_experiment_id,
             "name": e.name,
             "control_version": e.control_version,
@@ -184,7 +189,7 @@ def ingest_batch(engine: Engine, request: IngestBatchRequest) -> IngestionRespon
             stmt = pg_insert(IngestedExperiment).values(experiment_rows)
             stmt = stmt.on_conflict_do_update(
                 index_elements=["domain", "external_experiment_id"],
-                set_={c: stmt.excluded[c] for c in ("name", "control_version", "treatment_version", "start_date", "end_date")},
+                set_={c: stmt.excluded[c] for c in ("project_id", "name", "control_version", "treatment_version", "start_date", "end_date")},
             )
             db.execute(stmt)
 
