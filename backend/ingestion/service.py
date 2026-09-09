@@ -49,6 +49,42 @@ def _id(project_id: str | None, domain: str, *parts: str) -> uuid.UUID:
     return uuid.uuid5(_NAMESPACE, ":".join((str(project_id), domain, *parts)))
 
 
+def metric_id_for(project_id: str | None, domain: str, external_session_id: str, name: str) -> uuid.UUID:
+    """The same deterministic id a normal ingestion batch would assign to
+    a metric named `name` on this session (Stage 10). Used by connectors
+    that enrich an already-ingested session with additional metrics
+    through the upsert path below without going through a full
+    IngestBatchRequest — e.g. backend.connectors.postgres_business."""
+    return _id(project_id, domain, "metric", external_session_id, name)
+
+
+def upsert_metrics(engine: Engine, rows: list[dict], *, db: OrmSession | None = None) -> int:
+    """rows: {"metric_id": uuid.UUID, "session_id": uuid.UUID, "name": str,
+    "value": float}. The same upsert this module uses for every metric
+    ingest_batch writes (Stage 10 task 3: "persist through the existing
+    generic metric/storage model, do not create a separate analytics
+    path") — a second caller (a business-data connector) reuses this
+    exact function rather than its own copy of the upsert statement.
+
+    Pass `db` to participate in a caller's own transaction (ingest_batch
+    does, to keep its whole batch atomic); omitted, this opens and
+    commits its own short transaction."""
+    if not rows:
+        return 0
+    owns_session = db is None
+    session = db if db is not None else OrmSession(engine)
+    try:
+        stmt = pg_insert(IngestedMetric).values(rows)
+        stmt = stmt.on_conflict_do_update(index_elements=["session_id", "name"], set_={"value": stmt.excluded["value"]})
+        session.execute(stmt)
+        if owns_session:
+            session.commit()
+    finally:
+        if owns_session:
+            session.close()
+    return len(rows)
+
+
 class IngestionValidationError(Exception):
     def __init__(self, errors: list[IngestionErrorDetail]):
         self.errors = errors
@@ -250,13 +286,7 @@ def ingest_batch(engine: Engine, request: IngestBatchRequest, project_id: str | 
             )
             db.execute(stmt)
 
-        if metric_rows:
-            stmt = pg_insert(IngestedMetric).values(metric_rows)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["session_id", "name"],
-                set_={"value": stmt.excluded["value"]},
-            )
-            db.execute(stmt)
+        upsert_metrics(engine, metric_rows, db=db)
 
         db.commit()
 

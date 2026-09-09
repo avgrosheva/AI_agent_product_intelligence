@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.app.routers import ai_quality, alerts, auth, domains, experiments, ingestion, investigation, langfuse_connector, review, sessions
+from backend.app.routers import ai_quality, alerts, auth, domains, experiments, ingestion, investigation, langfuse_connector, postgres_business_connector, review, sessions
 from backend.app.schemas.common import ErrorResponse
 from backend.app.warmup import run_startup_warmup
 
@@ -72,6 +72,7 @@ app.include_router(domains.router)
 app.include_router(alerts.router)
 app.include_router(review.router)
 app.include_router(langfuse_connector.router)
+app.include_router(postgres_business_connector.router)
 
 
 @app.get("/health", tags=["health"])
