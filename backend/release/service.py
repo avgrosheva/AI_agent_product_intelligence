@@ -48,6 +48,9 @@ class ReleaseEvaluationResult:
     breached_guardrails: list = field(default_factory=list)
     top_findings: list = field(default_factory=list)
     economics: dict | None = None
+    raw_status: str = ""
+    data_quality_status: str = "healthy"
+    data_quality_gated: bool = False
 
 
 def _json_safe(value):
@@ -92,9 +95,14 @@ def _investigation_to_release_fields(result: InvestigationResult, all_metric_res
     ]
     top_findings = [
         {
-            "segment_label": f.segment_label, "p_value": _json_safe(f.p_value), "excess_contribution": _json_safe(f.excess_contribution),
+            "segment_label": f.segment_label, "dimensions": list(f.dimensions), "p_value": _json_safe(f.p_value),
+            "excess_contribution": _json_safe(f.excess_contribution),
             "cluster_mean_v1": _json_safe(f.cluster_mean_v1), "cluster_mean_v2": _json_safe(f.cluster_mean_v2),
             "dominant_failure_mode": f.dominant_failure_mode,
+            # Stage 11 task 4: a small, deterministic sample of session ids
+            # that illustrate this finding — see
+            # backend.investigation.evidence.select_representative_sessions.
+            "representative_session_ids": f.representative_session_ids,
         }
         for f in result.findings
     ]
@@ -155,10 +163,22 @@ def persist_release_evaluation(
     result: InvestigationResult,
     fields: dict,
     project_id: str | None = None,
+    data_quality_status: str = "healthy",
 ) -> ReleaseEvaluationResult:
     evaluation_id = uuid.uuid4()
     evaluated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    status = STATUS_BY_VERDICT[result.recommendation.verdict]
+    raw_status = STATUS_BY_VERDICT[result.recommendation.verdict]
+    # Stage 11 task 6: a project whose data quality is "critical" never
+    # gets a confident SHIP — the underlying Investigation verdict is
+    # still recorded (raw_status), but the status callers act on is
+    # downgraded to HOLD so a UI can't present SHIP on suspect data.
+    gated = data_quality_status == "critical" and raw_status == "SHIP"
+    status = "HOLD" if gated else raw_status
+    primary_reason = (
+        result.recommendation.primary_reason
+        if not gated
+        else f"{result.recommendation.primary_reason} (SHIP withheld: project data quality is critical)"
+    )
 
     row = ReleaseEvaluation(
         evaluation_id=evaluation_id,
@@ -167,10 +187,13 @@ def persist_release_evaluation(
         experiment_id=experiment_id,
         primary_metric=primary_metric_name,
         status=status,
+        raw_status=raw_status,
+        data_quality_status=data_quality_status,
+        data_quality_gated=gated,
         evaluated_at=evaluated_at,
         has_negative_segment=fields["has_negative_segment"],
         any_guardrail_breach=result.guardrails.any_breach,
-        primary_reason=result.recommendation.primary_reason,
+        primary_reason=primary_reason,
         next_action=result.recommendation.next_action,
         key_metrics=fields["key_metrics"],
         breached_guardrails=fields["breached_guardrails"],
@@ -188,10 +211,13 @@ def persist_release_evaluation(
         experiment_id=experiment_id,
         primary_metric=primary_metric_name,
         status=status,
+        raw_status=raw_status,
+        data_quality_status=data_quality_status,
+        data_quality_gated=gated,
         evaluated_at=evaluated_at,
         has_negative_segment=fields["has_negative_segment"],
         any_guardrail_breach=result.guardrails.any_breach,
-        primary_reason=result.recommendation.primary_reason,
+        primary_reason=primary_reason,
         next_action=result.recommendation.next_action,
         key_metrics=fields["key_metrics"],
         breached_guardrails=fields["breached_guardrails"],
@@ -204,7 +230,16 @@ def evaluate_and_persist_release(
     engine: Engine, domain: str, experiment_id: str, adapter: DomainAdapter, primary_metric_name: str, project_id: str | None = None
 ) -> ReleaseEvaluationResult:
     result, fields = evaluate_release(domain, experiment_id, adapter, primary_metric_name)
-    persisted = persist_release_evaluation(engine, domain, experiment_id, primary_metric_name, result, fields, project_id=project_id)
+
+    data_quality_status = "healthy"
+    if project_id is not None:
+        from backend.quality.service import compute_data_quality_report
+
+        data_quality_status = compute_data_quality_report(engine, project_id, domain).status
+
+    persisted = persist_release_evaluation(
+        engine, domain, experiment_id, primary_metric_name, result, fields, project_id=project_id, data_quality_status=data_quality_status
+    )
 
     # Stage 6 task 1: alert generation runs synchronously right after
     # persistence, deterministically, from the same already-computed
@@ -224,7 +259,21 @@ def _row_to_result(row) -> ReleaseEvaluationResult:
         has_negative_segment=row.has_negative_segment, any_guardrail_breach=row.any_guardrail_breach,
         primary_reason=row.primary_reason, next_action=row.next_action, key_metrics=row.key_metrics,
         breached_guardrails=row.breached_guardrails, top_findings=row.top_findings, economics=row.economics,
+        raw_status=row.raw_status, data_quality_status=row.data_quality_status, data_quality_gated=row.data_quality_gated,
     )
+
+
+def get_release_evaluation_by_id(engine: Engine, evaluation_id: str, project_id: str | None = None) -> ReleaseEvaluationResult | None:
+    """Stage 11 task 3: the evidence endpoint looks up one specific past
+    evaluation by id (not just "the latest") — scoped by project_id like
+    every other release-evaluation read, so a caller can never fetch
+    another project's evaluation by guessing its id."""
+    with OrmSession(engine) as session:
+        query = session.query(ReleaseEvaluation).filter(ReleaseEvaluation.evaluation_id == uuid.UUID(evaluation_id))
+        if project_id is not None:
+            query = query.filter(ReleaseEvaluation.project_id == project_id)
+        row = query.first()
+    return _row_to_result(row) if row is not None else None
 
 
 def get_latest_release_status(engine: Engine, domain: str, experiment_id: str, project_id: str | None = None) -> ReleaseEvaluationResult | None:

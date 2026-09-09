@@ -27,6 +27,7 @@ from backend.connectors.langfuse.client import LangfuseAPIError, LangfuseClient
 from backend.connectors.langfuse.config import LangfuseConfigError, LangfuseConnectionConfig
 from backend.connectors.langfuse.schemas import LangfuseImportMode, LangfuseImportPreview, LangfuseImportRequest, LangfuseImportResult
 from backend.connectors.langfuse.service import ExperimentMappingError, preview_import, run_import
+from backend.quality.service import record_connector_run
 
 router = APIRouter(prefix="/api/v1/connectors/langfuse", tags=["connectors"])
 
@@ -63,8 +64,18 @@ def import_from_langfuse(
     try:
         if request.mode == LangfuseImportMode.DRY_RUN:
             return preview_import(client, request)
-        return run_import(engine, client, request, project_id=project_id)
+        result = run_import(engine, client, request, project_id=project_id)
+        # Stage 11 task 5: the data-quality report's "connector import
+        # failures" signal reads only this log -- recorded for `import`
+        # mode only, never for a dry_run preview.
+        record_connector_run(
+            engine, project_id, request.domain, "langfuse", succeeded=True,
+            rows_fetched=result.traces_fetched, matched_rows=result.ingestion.sessions_ingested, unmatched_rows=result.sessions_skipped,
+        )
+        return result
     except LangfuseAPIError as exc:
+        if request.mode == LangfuseImportMode.IMPORT:
+            record_connector_run(engine, project_id, request.domain, "langfuse", succeeded=False, failure_reason=f"Langfuse API error (status {exc.status_code})")
         # Never forward the raw response body — it's diagnostic detail
         # from an external service, not something to echo back verbatim.
         raise HTTPException(status_code=502, detail=f"Langfuse API error (status {exc.status_code})") from exc

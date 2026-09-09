@@ -41,15 +41,22 @@ from backend.app.schemas.domain_generic import (
     GenericToolCallSchema,
     MechanismListResponse,
     MechanismSchema,
+    DataQualityReportResponse,
+    LinkedMechanismSchema,
+    NegativeSegmentEvidenceSchema,
     ReleaseEvaluationSchema,
+    ReleaseEvidenceResponse,
     ReleaseHistoryResponse,
+    SessionEvidenceSchema,
 )
 from backend.app.schemas.investigation import ExploredSegmentSummary, RecommendationSchema
 from backend.core.adapter import DomainAdapter
 from backend.core.guardrails import evaluate_guardrails
 from backend.core.investigation_config import investigation_config_from_adapter
 from backend.investigation.pipeline import run_investigation
-from backend.release.service import evaluate_and_persist_release, get_latest_release_status, list_release_history
+from backend.quality.service import compute_data_quality_report
+from backend.release.evidence import build_release_evidence
+from backend.release.service import evaluate_and_persist_release, get_latest_release_status, get_release_evaluation_by_id, list_release_history
 from backend.review.service import get_reviews_for_session
 
 router = APIRouter(prefix="/api/v1/domains", tags=["generic-domain-api"])
@@ -276,3 +283,67 @@ def get_release_history(
 ) -> ReleaseHistoryResponse:
     results = list_release_history(get_engine(), domain, experiment_id, project_id=ctx.project.project_id, limit=limit)
     return ReleaseHistoryResponse(domain=domain, experiment_id=experiment_id, evaluations=[ReleaseEvaluationSchema(**r.__dict__) for r in results])
+
+
+@router.get("/{domain}/experiments/{experiment_id}/release-evaluations/{evaluation_id}/evidence", response_model=ReleaseEvidenceResponse)
+def get_release_evidence(
+    domain: str, experiment_id: str, evaluation_id: str, ctx: ProjectContext = Depends(get_project_context)
+) -> ReleaseEvidenceResponse:
+    """Stage 11 task 3: the evidence layer for one past release decision
+    — breached guardrails, significant negative segments, the small
+    deterministic set of sessions that illustrate them (task 4), and any
+    linked, already-detected failure mechanism (Stage 6). Every field
+    here is either already stored on the evaluation row or re-read live
+    from the same adapter/project the evaluation itself used — nothing is
+    inferred or generated."""
+    evaluation = get_release_evaluation_by_id(get_engine(), evaluation_id, project_id=ctx.project.project_id)
+    if evaluation is None or evaluation.experiment_id != experiment_id or evaluation.domain != domain:
+        raise HTTPException(status_code=404, detail=f"No release evaluation '{evaluation_id}' for domain='{domain}' experiment_id='{experiment_id}'")
+
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
+    evidence = build_release_evidence(adapter, evaluation)
+    return ReleaseEvidenceResponse(
+        evaluation_id=evidence.evaluation_id,
+        domain=evidence.domain,
+        experiment_id=evidence.experiment_id,
+        status=evidence.status,
+        breached_guardrails=evidence.breached_guardrails,
+        significant_negative_segments=[
+            NegativeSegmentEvidenceSchema(
+                segment_label=s.segment_label, dimensions=list(s.dimensions), p_value=s.p_value,
+                excess_contribution=s.excess_contribution, dominant_failure_mode=s.dominant_failure_mode,
+                representative_session_ids=s.representative_session_ids,
+            )
+            for s in evidence.significant_negative_segments
+        ],
+        representative_sessions=[
+            SessionEvidenceSchema(
+                session_id=s.session_id, segment_label=s.segment_label, outcome=s.outcome,
+                transcript_excerpt=[list(t) for t in s.transcript_excerpt], action_sequence=s.action_sequence,
+            )
+            for s in evidence.representative_sessions
+        ],
+        linked_failure_mechanisms=[
+            LinkedMechanismSchema(
+                session_id=m.session_id, failure_mode=m.failure_mode, detector_source=m.detector_source,
+                confidence=m.confidence, evidence_text=m.evidence_text,
+            )
+            for m in evidence.linked_failure_mechanisms
+        ],
+    )
+
+
+@router.get("/{domain}/data-quality", response_model=DataQualityReportResponse)
+def get_data_quality_report(domain: str, ctx: ProjectContext = Depends(get_project_context)) -> DataQualityReportResponse:
+    """Stage 11 tasks 5-7: this project's data-quality report — see
+    backend.quality.service for the checks and their deterministic
+    thresholds. A project with no ingested data yet is reported healthy
+    with a "not_applicable" note, never silently omitted."""
+    report = compute_data_quality_report(get_engine(), ctx.project.project_id, domain)
+    return DataQualityReportResponse(
+        project_id=report.project_id,
+        domain=report.domain,
+        status=report.status,
+        generated_at=report.generated_at,
+        checks=[{"name": c.name, "value": c.value, "status": c.status, "detail": c.detail} for c in report.checks],
+    )

@@ -12,9 +12,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.app.routers import ai_quality, alerts, auth, domains, experiments, ingestion, investigation, langfuse_connector, postgres_business_connector, review, sessions
+from backend.app.routers import ai_quality, alerts, auth, domains, experiments, ingestion, investigation, langfuse_connector, monitoring, postgres_business_connector, review, sessions
 from backend.app.schemas.common import ErrorResponse
 from backend.app.warmup import run_startup_warmup
+from backend.monitoring.scheduler import MonitoringScheduler, scheduler_enabled_via_env
+
+_monitoring_scheduler: MonitoringScheduler | None = None
 
 
 @asynccontextmanager
@@ -25,7 +28,19 @@ async def lifespan(app: FastAPI):
     rationale and the cache-lifecycle/invalidation contract. Disabled by
     default so normal dev startup and the test suite are unaffected."""
     run_startup_warmup()
+
+    global _monitoring_scheduler
+    if scheduler_enabled_via_env():
+        from backend.app.domain_registry import get_adapter, get_engine
+
+        _monitoring_scheduler = MonitoringScheduler(get_engine(), get_adapter)
+        _monitoring_scheduler.start()
+
     yield
+
+    if _monitoring_scheduler is not None:
+        _monitoring_scheduler.stop()
+        _monitoring_scheduler = None
 
 
 app = FastAPI(
@@ -73,6 +88,7 @@ app.include_router(alerts.router)
 app.include_router(review.router)
 app.include_router(langfuse_connector.router)
 app.include_router(postgres_business_connector.router)
+app.include_router(monitoring.router)
 
 
 @app.get("/health", tags=["health"])

@@ -19,6 +19,7 @@ from backend.connectors.postgres_business.client import PostgresBusinessClient, 
 from backend.connectors.postgres_business.config import PostgresConfigError, PostgresConnectionConfig
 from backend.connectors.postgres_business.schemas import PostgresEnrichmentMode, PostgresEnrichmentPreview, PostgresEnrichmentRequest, PostgresEnrichmentResult
 from backend.connectors.postgres_business.service import JoinConfigError, preview_enrichment, run_enrichment
+from backend.quality.service import record_connector_run
 
 router = APIRouter(prefix="/api/v1/connectors/postgres-business", tags=["connectors"])
 
@@ -55,10 +56,22 @@ def enrich_from_postgres(
     try:
         if request.mode == PostgresEnrichmentMode.DRY_RUN:
             return preview_enrichment(engine, client, project_id, request)
-        return run_enrichment(engine, client, project_id, request)
+        result = run_enrichment(engine, client, project_id, request)
+        # Stage 11 task 5: the data-quality report's "unmatched business-
+        # data rate", "duplicate/conflicting data rate", and "connector
+        # import failures" signals read only this log -- recorded for
+        # `import` mode only, never for a dry_run preview.
+        record_connector_run(
+            engine, project_id, request.domain, "postgres_business", succeeded=True,
+            rows_fetched=result.source_rows_fetched, matched_rows=result.matched_rows,
+            unmatched_rows=len(result.unmatched_source_rows), validation_error_count=len(result.validation_errors),
+        )
+        return result
     except UnsafeQueryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except JoinConfigError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except PostgresConnectorError as exc:
+        if request.mode == PostgresEnrichmentMode.IMPORT:
+            record_connector_run(engine, project_id, request.domain, "postgres_business", succeeded=False, failure_reason=str(exc))
         raise HTTPException(status_code=502, detail="Business Postgres source is unreachable") from exc

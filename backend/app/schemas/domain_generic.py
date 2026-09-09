@@ -140,9 +140,63 @@ class ReleaseEvaluationSchema(BaseModel):
     top_findings: list
     project_id: str | None = None
     economics: dict | None = None
+    raw_status: Literal["SHIP", "HOLD", "ROLLBACK"]
+    data_quality_status: Literal["healthy", "warning", "critical"]
+    data_quality_gated: bool
 
 
 class ReleaseHistoryResponse(BaseModel):
     domain: str
     experiment_id: str
     evaluations: list[ReleaseEvaluationSchema]
+
+
+class SessionEvidenceSchema(BaseModel):
+    session_id: str
+    segment_label: str
+    outcome: str
+    transcript_excerpt: list[list[str]]
+    action_sequence: list[str]
+
+
+class NegativeSegmentEvidenceSchema(BaseModel):
+    segment_label: str
+    dimensions: list[str]
+    p_value: float | None
+    excess_contribution: float | None
+    dominant_failure_mode: str | None
+    representative_session_ids: list[str]
+
+
+class LinkedMechanismSchema(BaseModel):
+    session_id: str
+    failure_mode: str
+    detector_source: str
+    confidence: float | None
+    evidence_text: str | None
+
+
+class ReleaseEvidenceResponse(BaseModel):
+    evaluation_id: str
+    domain: str
+    experiment_id: str
+    status: str
+    breached_guardrails: list[dict]
+    significant_negative_segments: list[NegativeSegmentEvidenceSchema]
+    representative_sessions: list[SessionEvidenceSchema]
+    linked_failure_mechanisms: list[LinkedMechanismSchema]
+
+
+class DataQualityCheckSchema(BaseModel):
+    name: str
+    value: float | None
+    status: Literal["healthy", "warning", "critical", "not_applicable"]
+    detail: str
+
+
+class DataQualityReportResponse(BaseModel):
+    project_id: str
+    domain: str
+    status: Literal["healthy", "warning", "critical"]
+    generated_at: datetime
+    checks: list[DataQualityCheckSchema]

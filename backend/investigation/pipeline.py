@@ -31,6 +31,7 @@ from backend.analytics.stats.correction import benjamini_hochberg
 from backend.core.guardrails import evaluate_guardrails
 from backend.core.investigation_config import InvestigationConfig
 from backend.core.metrics import get_metric
+from backend.investigation.evidence import select_representative_sessions
 from backend.investigation.failure_attribution import FailureAttributionResult, compute_failure_attribution
 from backend.investigation.recommend import GuardrailReport, Recommendation, synthesize_recommendation
 from backend.investigation.scoring import (
@@ -63,6 +64,7 @@ class Finding:
     failure_attribution: FailureAttributionResult
     dominant_failure_mode: str | None
     trajectory_associations: list[PatternAssociation]
+    representative_session_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -165,6 +167,7 @@ def run_investigation(
                 reportable=False,
             )
 
+        dominant_failure_mode = _dominant_failure_mode(attribution)
         findings.append(
             Finding(
                 segment_label=row.segment.label,
@@ -177,8 +180,9 @@ def run_investigation(
                 effect_size_value=row.result.effect_size_value,
                 excess_contribution=row.excess_contribution,
                 failure_attribution=attribution,
-                dominant_failure_mode=_dominant_failure_mode(attribution),
+                dominant_failure_mode=dominant_failure_mode,
                 trajectory_associations=associations,
+                representative_session_ids=select_representative_sessions(seg_df, dominant_failure_mode, config.trajectory_config),
             )
         )
 

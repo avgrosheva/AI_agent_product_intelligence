@@ -51,3 +51,14 @@ class ReleaseEvaluation(Base):
     # independently nullable when their underlying data is unavailable —
     # see backend.economics.
     economics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Stage 11 task 6: `status` above may be downgraded from the
+    # Investigation engine's raw verdict when this project's data quality
+    # is "critical" (SHIP -> HOLD, never a confident SHIP on suspect
+    # data) — `raw_status` preserves what the engine actually concluded,
+    # `data_quality_status` records what data quality state that decision
+    # was made under, and `data_quality_gated` is true exactly when the
+    # two disagree.
+    raw_status: Mapped[str] = mapped_column(Text, nullable=False)
+    data_quality_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="healthy")
+    data_quality_gated: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

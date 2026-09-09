@@ -10,6 +10,8 @@ import backend.release.models  # noqa: F401 -- registers the release-evaluation 
 import backend.alerts.models  # noqa: F401 -- registers the alerts table onto Base.metadata for autogenerate
 import backend.review.models  # noqa: F401 -- registers the attribution_reviews table onto Base.metadata for autogenerate
 import backend.auth.models  # noqa: F401 -- registers users/organizations/memberships/projects onto Base.metadata for autogenerate
+import backend.monitoring.models  # noqa: F401 -- registers monitoring_configs/monitoring_runs onto Base.metadata for autogenerate
+import backend.quality.models  # noqa: F401 -- registers connector_runs onto Base.metadata for autogenerate
 
 config = context.config
 
