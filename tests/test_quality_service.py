@@ -6,8 +6,9 @@ computation, so the thresholds are proven against real stored rows."""
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import create_engine, text
 
 from backend.app.db import get_database_url
@@ -161,3 +162,77 @@ def test_data_quality_report_is_project_scoped(api_client, test_identity):
     engine = create_engine(get_database_url())
     assert compute_data_quality_report(engine, healthy_project, "support").status == "healthy"
     assert compute_data_quality_report(engine, critical_project, "support").status == "critical"
+
+
+def _session_at(sid: str, version: str, with_metric: bool, tag: str, started_at: str) -> dict:
+    return {
+        "external_session_id": sid, "external_experiment_id": f"quality-exp-{tag}", "agent_version": version,
+        "started_at": started_at, "outcome": {"label": "resolved", "metrics": []},
+        "metrics": [{"name": "handle_time_seconds", "value": 100.0}] if with_metric else [],
+    }
+
+
+def test_window_scopes_missing_metric_coverage_to_the_window(api_client, test_identity):
+    """Stage 13 task 7: old sessions (outside the window) have full
+    metric coverage; recent sessions (inside the window) have none. The
+    global (unwindowed) report should be mostly healthy; the windowed
+    report, seeing only the metric-less recent sessions, must be critical."""
+    from backend.core.analysis_window import AnalysisWindow
+
+    tag = f"windq-{uuid.uuid4().hex[:8]}"
+    project_id = new_support_project(test_identity, "Quality Window Project")
+    now = datetime.now(timezone.utc)
+    old_ts = (now - timedelta(days=10)).replace(tzinfo=None).isoformat()
+    recent_ts = (now - timedelta(hours=1)).replace(tzinfo=None).isoformat()
+
+    sessions = [_session_at(f"{tag}-old-{i}", "v1" if i % 2 else "v2", True, tag, old_ts) for i in range(20)]
+    sessions += [_session_at(f"{tag}-recent-{i}", "v1" if i % 2 else "v2", False, tag, recent_ts) for i in range(10)]
+    resp = api_client.post("/api/v1/ingest/sessions", json=_payload(tag, sessions), params={"project_id": project_id})
+    assert resp.status_code == 201
+
+    engine = create_engine(get_database_url())
+    global_report = compute_data_quality_report(engine, project_id, "support")
+    windowed_report = compute_data_quality_report(engine, project_id, "support", window=AnalysisWindow(start=now - timedelta(hours=6), end=now))
+
+    global_by_name = {c.name: c for c in global_report.checks}
+    windowed_by_name = {c.name: c for c in windowed_report.checks}
+
+    assert global_by_name["missing_metric_coverage_rate"].value == pytest.approx(10 / 30)  # 10 of 30 total
+    assert windowed_by_name["missing_metric_coverage_rate"].value == 1.0  # all 10 windowed sessions lack metrics
+    assert windowed_by_name["missing_metric_coverage_rate"].status == "critical"
+
+
+def test_ingestion_freshness_and_connector_failures_stay_global_regardless_of_window(api_client, test_identity):
+    """Stage 13 task 7: freshness and connector-health checks must never
+    be hidden by a narrow window — a stale integration or a connector
+    outage that happened outside the window is still real and must still
+    show up."""
+    from backend.core.analysis_window import AnalysisWindow
+
+    tag = f"windfresh-{uuid.uuid4().hex[:8]}"
+    project_id = new_support_project(test_identity, "Quality Window Freshness Project")
+    now = datetime.now(timezone.utc)
+    recent_ts = now.replace(tzinfo=None).isoformat()
+
+    sessions = [_session_at(f"{tag}-{i}", "v1" if i % 2 else "v2", True, tag, recent_ts) for i in range(10)]
+    api_client.post("/api/v1/ingest/sessions", json=_payload(tag, sessions), params={"project_id": project_id})
+
+    engine = create_engine(get_database_url())
+    record_connector_run(engine, project_id, "support", "langfuse", succeeded=False, failure_reason="simulated outage")
+    record_connector_run(engine, project_id, "support", "langfuse", succeeded=False, failure_reason="simulated outage")
+    record_connector_run(engine, project_id, "support", "langfuse", succeeded=False, failure_reason="simulated outage")
+
+    # A window that excludes ALL of this project's sessions (a narrow
+    # slice far in the past) -- freshness and connector failures must
+    # still be reported, unaffected.
+    narrow_past_window = AnalysisWindow(start=now - timedelta(days=100), end=now - timedelta(days=99))
+    report = compute_data_quality_report(engine, project_id, "support", window=narrow_past_window)
+    by_name = {c.name: c for c in report.checks}
+
+    assert by_name["ingestion_freshness_hours"].status == "healthy"  # sessions were ingested moments ago, globally
+    assert by_name["connector_import_failure_count"].value == 3.0
+    assert by_name["connector_import_failure_count"].status == "critical"
+    assert report.status == "critical"  # the connector failures alone make the overall status critical
+
+    # The window-scoped checks correctly show "no sessions in this window".
+    assert by_name["missing_metric_coverage_rate"].status == "not_applicable"

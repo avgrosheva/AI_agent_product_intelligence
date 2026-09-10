@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session as OrmSession
 
 from backend.analytics.experiment_results import analyze_all_metrics
 from backend.core.adapter import DomainAdapter
+from backend.core.analysis_window import AnalysisWindow
 from backend.core.investigation_config import investigation_config_from_adapter
 from backend.economics.compute import EconomicsResult, compute_economics
 from backend.investigation.pipeline import InvestigationResult, run_investigation
@@ -51,6 +52,12 @@ class ReleaseEvaluationResult:
     raw_status: str = ""
     data_quality_status: str = "healthy"
     data_quality_gated: bool = False
+    # Stage 13 task 5: the actual effective window this evaluation used —
+    # all three None for a manual, unwindowed evaluation (unchanged from
+    # before Stage 13), all three set for a monitoring-job run.
+    data_window_start: datetime | None = None
+    data_window_end: datetime | None = None
+    window_hours: int | None = None
 
 
 def _json_safe(value):
@@ -137,15 +144,21 @@ def evaluate_release(
     experiment_id: str,
     adapter: DomainAdapter,
     primary_metric_name: str,
+    window: AnalysisWindow | None = None,
 ) -> tuple[InvestigationResult, dict]:
     """Runs the Investigation engine for this (domain, experiment_id,
     primary_metric) — pure computation, no persistence — and returns both
     the raw InvestigationResult (for an API response that wants the full
     findings/scan detail) and the compact release-evaluation fields
-    (for persistence and for the release-status summary)."""
+    (for persistence and for the release-status summary).
+
+    Stage 13 task 1/3: `window`, when given, is passed straight through
+    to the adapter — this function has no filtering logic of its own,
+    generic or domain-specific. `None` (a manual evaluation) means the
+    full dataset, exactly as before Stage 13 (task 4)."""
     config = investigation_config_from_adapter(adapter)
-    base_df = adapter.analytics_base_df(experiment_id=experiment_id)
-    agent_actions_df = adapter.agent_actions_df(experiment_id=experiment_id)
+    base_df = adapter.analytics_base_df(experiment_id=experiment_id, window=window)
+    agent_actions_df = adapter.agent_actions_df(experiment_id=experiment_id, window=window)
     failure_attributions_wide_df = adapter.failure_attributions_wide_df()
 
     result = run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, config, primary_metric_name=primary_metric_name)
@@ -164,6 +177,8 @@ def persist_release_evaluation(
     fields: dict,
     project_id: str | None = None,
     data_quality_status: str = "healthy",
+    window: AnalysisWindow | None = None,
+    window_hours: int | None = None,
 ) -> ReleaseEvaluationResult:
     evaluation_id = uuid.uuid4()
     evaluated_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -199,6 +214,9 @@ def persist_release_evaluation(
         breached_guardrails=fields["breached_guardrails"],
         top_findings=fields["top_findings"],
         economics=fields.get("economics"),
+        data_window_start=window.start if window else None,
+        data_window_end=window.end if window else None,
+        window_hours=window_hours if window else None,
     )
     with OrmSession(engine) as session:
         session.add(row)
@@ -223,22 +241,43 @@ def persist_release_evaluation(
         breached_guardrails=fields["breached_guardrails"],
         top_findings=fields["top_findings"],
         economics=fields.get("economics"),
+        data_window_start=window.start if window else None,
+        data_window_end=window.end if window else None,
+        window_hours=window_hours if window else None,
     )
 
 
 def evaluate_and_persist_release(
-    engine: Engine, domain: str, experiment_id: str, adapter: DomainAdapter, primary_metric_name: str, project_id: str | None = None
+    engine: Engine,
+    domain: str,
+    experiment_id: str,
+    adapter: DomainAdapter,
+    primary_metric_name: str,
+    project_id: str | None = None,
+    window: AnalysisWindow | None = None,
+    window_hours: int | None = None,
 ) -> ReleaseEvaluationResult:
-    result, fields = evaluate_release(domain, experiment_id, adapter, primary_metric_name)
+    """Stage 13: `window`/`window_hours` are the ONLY new parameters this
+    function gained — a manual call (the on-demand release-evaluations
+    API endpoint) never passes them, so its behavior is byte-identical to
+    before Stage 13 (task 4). backend.monitoring.service.run_monitoring_job
+    is the one caller that does, for a config with window_hours set."""
+    result, fields = evaluate_release(domain, experiment_id, adapter, primary_metric_name, window=window)
 
     data_quality_status = "healthy"
     if project_id is not None:
         from backend.quality.service import compute_data_quality_report
 
-        data_quality_status = compute_data_quality_report(engine, project_id, domain).status
+        # Stage 13 task 7: the SAME window narrows only the checks that
+        # describe this evaluation's own data (missing outcome/metric
+        # coverage, arm balance, sessions without version) — freshness and
+        # connector-health checks stay global regardless, inside
+        # compute_data_quality_report itself.
+        data_quality_status = compute_data_quality_report(engine, project_id, domain, window=window).status
 
     persisted = persist_release_evaluation(
-        engine, domain, experiment_id, primary_metric_name, result, fields, project_id=project_id, data_quality_status=data_quality_status
+        engine, domain, experiment_id, primary_metric_name, result, fields, project_id=project_id,
+        data_quality_status=data_quality_status, window=window, window_hours=window_hours,
     )
 
     # Stage 6 task 1: alert generation runs synchronously right after
@@ -267,6 +306,7 @@ def _row_to_result(row) -> ReleaseEvaluationResult:
         primary_reason=row.primary_reason, next_action=row.next_action, key_metrics=row.key_metrics,
         breached_guardrails=row.breached_guardrails, top_findings=row.top_findings, economics=row.economics,
         raw_status=row.raw_status, data_quality_status=row.data_quality_status, data_quality_gated=row.data_quality_gated,
+        data_window_start=row.data_window_start, data_window_end=row.data_window_end, window_hours=row.window_hours,
     )
 
 

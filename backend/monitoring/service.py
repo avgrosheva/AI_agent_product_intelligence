@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session as OrmSession
 
+from backend.core.analysis_window import AnalysisWindow
 from backend.monitoring.models import MonitoringConfig, MonitoringRun
 
 
@@ -52,6 +53,7 @@ class MonitoringRunResult:
     completed_at: datetime | None
     data_window_start: datetime | None
     data_window_end: datetime | None
+    window_hours: int | None
     release_evaluation_id: str | None
     failure_reason: str | None
 
@@ -73,7 +75,8 @@ def _run_to_result(row: MonitoringRun) -> MonitoringRunResult:
         run_id=str(row.run_id), config_id=str(row.config_id) if row.config_id else None, project_id=row.project_id,
         domain=row.domain, experiment_id=row.experiment_id, primary_metric=row.primary_metric, status=row.status,
         started_at=row.started_at, completed_at=row.completed_at, data_window_start=row.data_window_start,
-        data_window_end=row.data_window_end, release_evaluation_id=row.release_evaluation_id, failure_reason=row.failure_reason,
+        data_window_end=row.data_window_end, window_hours=row.window_hours,
+        release_evaluation_id=row.release_evaluation_id, failure_reason=row.failure_reason,
     )
 
 
@@ -119,7 +122,13 @@ def run_monitoring_job(engine: Engine, config: MonitoringConfigResult, adapter_f
     from backend.release.service import evaluate_and_persist_release
 
     started_at = _now()
+    # Stage 13 task 2: data_window_end = evaluation time, data_window_start
+    # = data_window_end - window_hours — this IS the evaluation time for a
+    # monitoring run, since evaluate_and_persist_release runs synchronously
+    # right after. No window_hours configured -> no window at all -> the
+    # same full-dataset behavior a manual evaluation has always had.
     window_start = started_at - timedelta(hours=config.window_hours) if config.window_hours else None
+    window = AnalysisWindow(start=window_start, end=started_at) if window_start else None
     run_id = uuid.uuid4()
     key = _lock_key(config.project_id, config.experiment_id)
 
@@ -133,7 +142,7 @@ def run_monitoring_job(engine: Engine, config: MonitoringConfigResult, adapter_f
                     run_id=run_id, config_id=uuid.UUID(config.config_id), project_id=config.project_id, domain=config.domain,
                     experiment_id=config.experiment_id, primary_metric=config.primary_metric, status="skipped_duplicate",
                     started_at=started_at, completed_at=started_at, data_window_start=window_start, data_window_end=started_at,
-                    release_evaluation_id=None, failure_reason=reason,
+                    window_hours=config.window_hours, release_evaluation_id=None, failure_reason=reason,
                 )
                 session.add(row)
                 session.commit()
@@ -144,14 +153,17 @@ def run_monitoring_job(engine: Engine, config: MonitoringConfigResult, adapter_f
                 run_id=run_id, config_id=uuid.UUID(config.config_id), project_id=config.project_id, domain=config.domain,
                 experiment_id=config.experiment_id, primary_metric=config.primary_metric, status="running",
                 started_at=started_at, completed_at=None, data_window_start=window_start, data_window_end=started_at,
-                release_evaluation_id=None, failure_reason=None,
+                window_hours=config.window_hours, release_evaluation_id=None, failure_reason=None,
             )
             session.add(row)
             session.commit()
 
         try:
             adapter = adapter_factory(config.domain, config.project_id)
-            result = evaluate_and_persist_release(engine, config.domain, config.experiment_id, adapter, config.primary_metric, project_id=config.project_id)
+            result = evaluate_and_persist_release(
+                engine, config.domain, config.experiment_id, adapter, config.primary_metric, project_id=config.project_id,
+                window=window, window_hours=config.window_hours,
+            )
             completed_at = _now()
             with OrmSession(engine) as session:
                 session.query(MonitoringRun).filter(MonitoringRun.run_id == run_id).update(

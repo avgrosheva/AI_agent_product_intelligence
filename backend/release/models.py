@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Text
+from sqlalchemy import Boolean, Integer, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -62,3 +62,12 @@ class ReleaseEvaluation(Base):
     raw_status: Mapped[str] = mapped_column(Text, nullable=False)
     data_quality_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="healthy")
     data_quality_gated: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+    # Stage 13 task 5: the actual effective analysis window this
+    # evaluation used (backend.core.analysis_window.AnalysisWindow) — all
+    # three null for a manual, unwindowed evaluation (the same "full
+    # dataset" behavior this table has always had), all three set for a
+    # monitoring-job run with window_hours configured.
+    data_window_start: Mapped[datetime | None] = mapped_column(nullable=True)
+    data_window_end: Mapped[datetime | None] = mapped_column(nullable=True)
+    window_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)

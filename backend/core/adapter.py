@@ -22,6 +22,7 @@ from typing import Protocol
 
 import pandas as pd
 
+from backend.core.analysis_window import AnalysisWindow
 from backend.core.attribution import MechanismRegistry, ReviewableAttribution
 from backend.economics.config import EconomicsConfig
 from backend.core.guardrails import GuardrailDefinition
@@ -33,10 +34,19 @@ from backend.core.trajectory_config import TrajectoryConfig
 class DomainAdapter(Protocol):
     domain: str
 
-    def analytics_base_df(self, experiment_id: str | None = None) -> pd.DataFrame:
+    def analytics_base_df(self, experiment_id: str | None = None, window: AnalysisWindow | None = None) -> pd.DataFrame:
         """One row per session, with at minimum: session_id, experiment_id,
         agent_version, and whatever generic outcome/metric columns this
-        domain's metric_value_columns() references."""
+        domain's metric_value_columns() references.
+
+        Stage 13 task 1/3: `window`, when given, restricts sessions to
+        `started_at >= window.start AND started_at <= window.end`
+        (backend.core.analysis_window.AnalysisWindow — the one
+        consistent rule, applied here so every caller — metrics,
+        guardrails, investigation, segment scan, economics, evidence —
+        sees the same windowed data without knowing about windows
+        itself. `None` (the default) means the full dataset, unchanged
+        from before this existed (Stage 13 task 4)."""
         ...
 
     def build_session_context(self, session_id: str) -> CoreSessionContext:
@@ -86,12 +96,17 @@ class DomainAdapter(Protocol):
         generic /domains/{domain}/experiments listing's only data source."""
         ...
 
-    def agent_actions_df(self, experiment_id: str | None = None) -> pd.DataFrame:
+    def agent_actions_df(self, experiment_id: str | None = None, window: AnalysisWindow | None = None) -> pd.DataFrame:
         """Columns: session_id, sequence_index, action_type — the same
         shape backend.investigation.trajectory_attribution.
         reconstruct_trajectories already expects. Empty (but correctly
         shaped) is valid for a domain that never registers a mechanism and
-        so never runs trajectory attribution."""
+        so never runs trajectory attribution.
+
+        `window` restricts to actions whose OWN session falls inside the
+        window (same rule as analytics_base_df) — trajectory
+        reconstruction must never see an action from a session the
+        windowed metrics/guardrails themselves excluded."""
         ...
 
     def failure_attributions_wide_df(self) -> pd.DataFrame:

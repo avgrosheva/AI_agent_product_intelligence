@@ -16,6 +16,7 @@ from sqlalchemy.engine import Engine
 
 from backend.analytics import metric_registry
 from backend.analytics.sql_runner import run_sql_file
+from backend.core.analysis_window import AnalysisWindow
 from backend.core.attribution import MechanismRegistry, ReviewableAttribution
 from backend.core.guardrails import GuardrailDefinition
 from backend.economics.config import EconomicsConfig
@@ -59,12 +60,19 @@ class CommerceAdapter:
             ).scalars().all()
         return set(rows)
 
-    def analytics_base_df(self, experiment_id: str | None = None) -> pd.DataFrame:
+    def analytics_base_df(self, experiment_id: str | None = None, window: AnalysisWindow | None = None) -> pd.DataFrame:
         df = run_sql_file(self._engine, "session_level_base.sql")
         if self._project_id is not None:
             df = df[df["experiment_id"].astype(str).isin(self._owned_experiment_ids())]
         if experiment_id is not None:
             df = df[df["experiment_id"].astype(str) == experiment_id]
+        if window is not None:
+            # Stage 13 tasks 1-2: the one consistent window rule --
+            # started_at >= start AND started_at <= end, inclusive both
+            # ends -- same rule SupportAdapter applies in SQL; here in
+            # pandas since session_level_base.sql is a fixed, pre-built
+            # query already run above.
+            df = df[(df["started_at"] >= window.start) & (df["started_at"] <= window.end)]
         return df
 
     def build_session_context(self, session_id: str) -> SessionContext:
@@ -152,10 +160,10 @@ class CommerceAdapter:
             for r in rows
         ]
 
-    def agent_actions_df(self, experiment_id: str | None = None) -> pd.DataFrame:
+    def agent_actions_df(self, experiment_id: str | None = None, window: AnalysisWindow | None = None) -> pd.DataFrame:
         query = "SELECT a.session_id, a.sequence_index, a.action_type::text AS action_type FROM agent_actions a"
-        params: dict[str, str] = {}
-        needs_join = self._project_id is not None or experiment_id is not None
+        params: dict[str, object] = {}
+        needs_join = self._project_id is not None or experiment_id is not None or window is not None
         if needs_join:
             query += " JOIN sessions s ON s.session_id = a.session_id"
         if self._project_id is not None:
@@ -167,6 +175,10 @@ class CommerceAdapter:
         if experiment_id is not None:
             where.append("s.experiment_id::text = :eid")
             params["eid"] = experiment_id
+        if window is not None:
+            where.append("s.started_at >= :window_start AND s.started_at <= :window_end")
+            params["window_start"] = window.start
+            params["window_end"] = window.end
         if where:
             query += " WHERE " + " AND ".join(where)
         with self._engine.connect() as conn:

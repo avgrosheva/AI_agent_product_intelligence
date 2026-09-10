@@ -46,6 +46,7 @@ class MonitoringRunSchema(BaseModel):
     completed_at: datetime | None
     data_window_start: datetime | None
     data_window_end: datetime | None
+    window_hours: int | None
     release_evaluation_id: str | None
     failure_reason: str | None
 

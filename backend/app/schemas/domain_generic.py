@@ -143,6 +143,9 @@ class ReleaseEvaluationSchema(BaseModel):
     raw_status: Literal["SHIP", "HOLD", "ROLLBACK"]
     data_quality_status: Literal["healthy", "warning", "critical"]
     data_quality_gated: bool
+    data_window_start: datetime | None = None
+    data_window_end: datetime | None = None
+    window_hours: int | None = None
 
 
 class ReleaseHistoryResponse(BaseModel):

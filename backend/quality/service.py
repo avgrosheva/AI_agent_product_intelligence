@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from backend.core.analysis_window import AnalysisWindow
+
 FRESHNESS_WARNING_HOURS = 24.0
 FRESHNESS_CRITICAL_HOURS = 72.0
 MISSING_OUTCOME_WARNING = 0.05
@@ -117,8 +119,19 @@ def record_connector_run(
         )
 
 
-def compute_data_quality_report(engine: Engine, project_id: str, domain: str) -> DataQualityReport:
+def compute_data_quality_report(engine: Engine, project_id: str, domain: str, window: AnalysisWindow | None = None) -> DataQualityReport:
+    """Stage 13 task 7: `window`, when given, narrows only the checks
+    that describe THIS EVALUATION'S OWN data (missing outcome/metric
+    coverage, sessions without version, arm balance) to the sessions
+    inside it. Ingestion freshness and every connector-run-log-derived
+    check (unmatched business-data rate, duplicate/conflict rate,
+    connector import failures) stay global regardless of `window` —
+    those describe the health of the pipeline/integrations themselves,
+    and a stale integration or a connector outage must never be hidden
+    just because it happened outside one evaluation's analysis window."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    window_clause = " AND started_at >= :window_start AND started_at <= :window_end" if window is not None else ""
+    window_params: dict[str, object] = {"window_start": window.start, "window_end": window.end} if window is not None else {}
 
     with engine.connect() as conn:
         total = conn.execute(
@@ -144,25 +157,33 @@ def compute_data_quality_report(engine: Engine, project_id: str, domain: str) ->
         latest_ingested = conn.execute(
             text("SELECT max(created_at) FROM ingested_sessions WHERE project_id = :p AND domain = :d"), {"p": project_id, "d": domain}
         ).scalar_one()
+        windowed_total = (
+            conn.execute(
+                text(f"SELECT count(*) FROM ingested_sessions WHERE project_id = :p AND domain = :d{window_clause}"),
+                {"p": project_id, "d": domain, **window_params},
+            ).scalar_one()
+            if window is not None
+            else total
+        )
         missing_outcome = conn.execute(
-            text("SELECT count(*) FROM ingested_sessions WHERE project_id = :p AND domain = :d AND (outcome_label IS NULL OR outcome_label = '')"),
-            {"p": project_id, "d": domain},
+            text(f"SELECT count(*) FROM ingested_sessions WHERE project_id = :p AND domain = :d AND (outcome_label IS NULL OR outcome_label = ''){window_clause}"),
+            {"p": project_id, "d": domain, **window_params},
         ).scalar_one()
         missing_version = conn.execute(
-            text("SELECT count(*) FROM ingested_sessions WHERE project_id = :p AND domain = :d AND (agent_version IS NULL OR agent_version = '')"),
-            {"p": project_id, "d": domain},
+            text(f"SELECT count(*) FROM ingested_sessions WHERE project_id = :p AND domain = :d AND (agent_version IS NULL OR agent_version = ''){window_clause}"),
+            {"p": project_id, "d": domain, **window_params},
         ).scalar_one()
         with_metrics = conn.execute(
             text(
                 "SELECT count(DISTINCT s.session_id) FROM ingested_sessions s JOIN ingested_metrics m ON m.session_id = s.session_id "
-                "WHERE s.project_id = :p AND s.domain = :d"
+                f"WHERE s.project_id = :p AND s.domain = :d{window_clause.replace('started_at', 's.started_at')}"
             ),
-            {"p": project_id, "d": domain},
+            {"p": project_id, "d": domain, **window_params},
         ).scalar_one()
         arm_counts = dict(
             conn.execute(
-                text("SELECT agent_version, count(*) FROM ingested_sessions WHERE project_id = :p AND domain = :d GROUP BY agent_version"),
-                {"p": project_id, "d": domain},
+                text(f"SELECT agent_version, count(*) FROM ingested_sessions WHERE project_id = :p AND domain = :d{window_clause} GROUP BY agent_version"),
+                {"p": project_id, "d": domain, **window_params},
             ).all()
         )
         last_business_run = conn.execute(
@@ -193,35 +214,42 @@ def compute_data_quality_report(engine: Engine, project_id: str, domain: str) ->
             )
         )
 
-    missing_outcome_rate = missing_outcome / total
-    checks.append(
-        QualityCheck(
-            "missing_outcome_rate",
-            missing_outcome_rate,
-            _bucket(missing_outcome_rate, MISSING_OUTCOME_WARNING, MISSING_OUTCOME_CRITICAL),
-            f"{missing_outcome}/{total} sessions have no outcome label",
-        )
-    )
+    window_note = f" (windowed: last {(window.end - window.start).total_seconds() / 3600:.1f}h)" if window is not None else ""
 
-    missing_metric_rate = 1.0 - (with_metrics / total)
-    checks.append(
-        QualityCheck(
-            "missing_metric_coverage_rate",
-            missing_metric_rate,
-            _bucket(missing_metric_rate, MISSING_METRIC_WARNING, MISSING_METRIC_CRITICAL),
-            f"{total - with_metrics}/{total} sessions have no metrics recorded at all",
+    if window is not None and windowed_total == 0:
+        checks.append(QualityCheck("missing_outcome_rate", None, "not_applicable", "no sessions in the evaluated window"))
+        checks.append(QualityCheck("missing_metric_coverage_rate", None, "not_applicable", "no sessions in the evaluated window"))
+        checks.append(QualityCheck("sessions_without_version_rate", None, "not_applicable", "no sessions in the evaluated window"))
+    else:
+        missing_outcome_rate = missing_outcome / windowed_total
+        checks.append(
+            QualityCheck(
+                "missing_outcome_rate",
+                missing_outcome_rate,
+                _bucket(missing_outcome_rate, MISSING_OUTCOME_WARNING, MISSING_OUTCOME_CRITICAL),
+                f"{missing_outcome}/{windowed_total} sessions have no outcome label{window_note}",
+            )
         )
-    )
 
-    missing_version_rate = missing_version / total
-    checks.append(
-        QualityCheck(
-            "sessions_without_version_rate",
-            missing_version_rate,
-            _bucket(missing_version_rate, VERSION_MISSING_WARNING, VERSION_MISSING_CRITICAL),
-            f"{missing_version}/{total} sessions have no agent_version",
+        missing_metric_rate = 1.0 - (with_metrics / windowed_total)
+        checks.append(
+            QualityCheck(
+                "missing_metric_coverage_rate",
+                missing_metric_rate,
+                _bucket(missing_metric_rate, MISSING_METRIC_WARNING, MISSING_METRIC_CRITICAL),
+                f"{windowed_total - with_metrics}/{windowed_total} sessions have no metrics recorded at all{window_note}",
+            )
         )
-    )
+
+        missing_version_rate = missing_version / windowed_total
+        checks.append(
+            QualityCheck(
+                "sessions_without_version_rate",
+                missing_version_rate,
+                _bucket(missing_version_rate, VERSION_MISSING_WARNING, VERSION_MISSING_CRITICAL),
+                f"{missing_version}/{windowed_total} sessions have no agent_version{window_note}",
+            )
+        )
 
     non_null_arms = {k: v for k, v in arm_counts.items() if k}
     if len(non_null_arms) < 2 or any(v == 0 for v in non_null_arms.values()):
@@ -230,7 +258,7 @@ def compute_data_quality_report(engine: Engine, project_id: str, domain: str) ->
                 "experiment_arm_balance_ratio",
                 0.0 if non_null_arms else None,
                 "critical" if non_null_arms else "not_applicable",
-                f"agent_version counts: {non_null_arms or 'none'} — need at least two non-empty arms to compare",
+                f"agent_version counts: {non_null_arms or 'none'} — need at least two non-empty arms to compare{window_note}",
             )
         )
     else:
@@ -241,7 +269,7 @@ def compute_data_quality_report(engine: Engine, project_id: str, domain: str) ->
                 "experiment_arm_balance_ratio",
                 ratio,
                 _bucket_inverse(ratio, ARM_BALANCE_WARNING, ARM_BALANCE_CRITICAL),
-                f"agent_version counts: {non_null_arms}",
+                f"agent_version counts: {non_null_arms}{window_note}",
             )
         )
 

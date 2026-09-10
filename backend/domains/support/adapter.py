@@ -11,6 +11,7 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from backend.core.analysis_window import AnalysisWindow
 from backend.core.attribution import MechanismRegistry, ReviewableAttribution
 from backend.economics.config import EconomicsConfig
 from backend.core.guardrails import GuardrailDefinition
@@ -55,9 +56,9 @@ class SupportAdapter:
         params["project_id"] = self._project_id
         return f" AND {experiment_alias}.project_id = :project_id"
 
-    def analytics_base_df(self, experiment_id: str | None = None) -> pd.DataFrame:
+    def analytics_base_df(self, experiment_id: str | None = None, window: AnalysisWindow | None = None) -> pd.DataFrame:
         with self._engine.connect() as conn:
-            params: dict[str, str] = {"domain": self.domain}
+            params: dict[str, object] = {"domain": self.domain}
             query = (
                 "SELECT s.session_id, s.experiment_id, s.agent_version, s.external_user_id AS user_id, "
                 "s.outcome_label, s.started_at, s.ended_at, s.context->>'ticket_category' AS ticket_category "
@@ -65,6 +66,15 @@ class SupportAdapter:
                 "WHERE s.domain = :domain"
             )
             query += self._project_filter(params)
+            # Stage 13 tasks 1-2: the one consistent window rule --
+            # started_at >= start AND started_at <= end, inclusive both
+            # ends -- applied here so metrics/guardrails/investigation/
+            # segment scan/economics/evidence all see the same windowed
+            # rows without any of them knowing a window exists.
+            if window is not None:
+                query += " AND s.started_at >= :window_start AND s.started_at <= :window_end"
+                params["window_start"] = window.start
+                params["window_end"] = window.end
             sessions = pd.read_sql(text(query), conn, params=params)
             actions = pd.read_sql(
                 text(
@@ -242,8 +252,8 @@ class SupportAdapter:
             for r in rows
         ]
 
-    def agent_actions_df(self, experiment_id: str | None = None) -> pd.DataFrame:
-        params: dict[str, str] = {"domain": self.domain}
+    def agent_actions_df(self, experiment_id: str | None = None, window: AnalysisWindow | None = None) -> pd.DataFrame:
+        params: dict[str, object] = {"domain": self.domain}
         query = (
             "SELECT a.session_id, a.sequence_index, a.action_type FROM ingested_actions a "
             "JOIN ingested_sessions s ON s.session_id = a.session_id "
@@ -254,6 +264,10 @@ class SupportAdapter:
         if experiment_id is not None:
             query += " AND s.experiment_id::text = :eid"
             params["eid"] = experiment_id
+        if window is not None:
+            query += " AND s.started_at >= :window_start AND s.started_at <= :window_end"
+            params["window_start"] = window.start
+            params["window_end"] = window.end
         with self._engine.connect() as conn:
             df = pd.read_sql(text(query), conn, params=params)
         df["session_id"] = df["session_id"].astype(str)

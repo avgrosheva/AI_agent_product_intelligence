@@ -50,5 +50,9 @@ class MonitoringRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     data_window_start: Mapped[datetime | None] = mapped_column(nullable=True)
     data_window_end: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Stage 13 task 5: the config's window_hours AT THE TIME this run
+    # executed — self-contained provenance on the run row itself, not
+    # just inferable from the (possibly since-changed) config.
+    window_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     release_evaluation_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

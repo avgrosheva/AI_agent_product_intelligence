@@ -6,6 +6,7 @@ data-quality report, all consistent with each other."""
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 
 OTHER_CATEGORIES = ["technical", "account_access", "shipping_status", "general_inquiry"]
@@ -15,12 +16,20 @@ def _ingest_rollback_fixture(api_client, project_id: str, tag: str) -> str:
     """Category varies ("billing" regresses much harder than the other
     four) so the segment scan flags a real negative segment on top of the
     overall ROLLBACK verdict — this test checks evidence downstream of a
-    monitoring-triggered run, not just the verdict itself."""
+    monitoring-triggered run, not just the verdict itself.
+
+    Stage 13: timestamps are relative to "now" (not a fixed calendar
+    date) because this test's monitoring config sets window_hours=24,
+    and window_hours is now operational (Stage 13) — a fixed past date
+    would fall outside any real 24h window and silently break this test
+    the moment "now" moves past it."""
+
+    started_at = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(tzinfo=None).isoformat()
 
     def session(sid: str, version: str, outcome: str, category: str) -> dict:
         return {
             "external_session_id": sid, "external_experiment_id": f"e2e11-exp-{tag}", "agent_version": version, "external_user_id": f"user-{sid}",
-            "started_at": "2026-09-01T00:00:00", "outcome": {"label": outcome, "metrics": []},
+            "started_at": started_at, "outcome": {"label": outcome, "metrics": []},
             "metrics": [{"name": "handle_time_seconds", "value": 300.0}],
             "context": {"ticket_category": category},
         }
