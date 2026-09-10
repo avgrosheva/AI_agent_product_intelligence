@@ -5,8 +5,9 @@ import { renderWithProviders } from './test/renderWithProviders'
 import { EXPERIMENT_ID } from './test/fixtures'
 
 vi.mock('./api/client', async () => {
+  const actual = await vi.importActual<typeof import('./api/client')>('./api/client')
   const { apiGetMockImpl } = await import('./test/fixtures')
-  return { apiGet: vi.fn(apiGetMockImpl) }
+  return { ...actual, apiGet: vi.fn(apiGetMockImpl) }
 })
 
 describe('App routing', () => {

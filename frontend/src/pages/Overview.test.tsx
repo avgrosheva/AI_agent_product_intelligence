@@ -4,8 +4,9 @@ import { Overview } from './Overview'
 import { renderWithProviders } from '../test/renderWithProviders'
 
 vi.mock('../api/client', async () => {
+  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
   const { apiGetMockImpl } = await import('../test/fixtures')
-  return { apiGet: vi.fn(apiGetMockImpl) }
+  return { ...actual, apiGet: vi.fn(apiGetMockImpl) }
 })
 
 describe('Overview', () => {

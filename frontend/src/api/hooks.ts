@@ -10,6 +10,7 @@ import type {
   InvestigationLens,
   InvestigationResponse,
   MetricTableResponse,
+  ReleaseSummaryResponse,
   SessionDetail,
   SessionListResponse,
 } from './types'
@@ -120,6 +121,19 @@ export function useSessionDetail(sessionId: string | undefined) {
     queryKey: ['session', sessionId],
     queryFn: () => apiGet<SessionDetail>(`/sessions/${sessionId}`),
     enabled: !!sessionId,
+    staleTime: STALE_TIME_MS,
+  })
+}
+
+// Stage 14: the release-summary endpoint lives under the generic,
+// project-scoped domain API (unlike the commerce-only routes above) —
+// this app has exactly one commerce project per logged-in user, so the
+// backend resolves it implicitly with no project_id needed.
+export function useReleaseSummary(experimentId: string | undefined) {
+  return useQuery({
+    queryKey: ['release-summary', experimentId],
+    queryFn: () => apiGet<ReleaseSummaryResponse>(`/api/v1/domains/commerce/experiments/${experimentId}/release-summary`),
+    enabled: !!experimentId,
     staleTime: STALE_TIME_MS,
   })
 }

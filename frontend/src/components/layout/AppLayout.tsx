@@ -25,6 +25,9 @@ export function AppLayout() {
           <NavLink to={expPath} end className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
             Experiment
           </NavLink>
+          <NavLink to={`${expPath}/release`} className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
+            Release Decision
+          </NavLink>
           <NavLink to={`${expPath}/investigation`} className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
             Investigation
           </NavLink>

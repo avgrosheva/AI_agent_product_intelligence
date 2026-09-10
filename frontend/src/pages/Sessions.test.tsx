@@ -4,7 +4,10 @@ import { Sessions } from './Sessions'
 import { renderWithProviders } from '../test/renderWithProviders'
 import { EXPERIMENT_ID, SESSION_LIST_FIXTURE, apiGetMockImpl } from '../test/fixtures'
 
-vi.mock('../api/client', () => ({ apiGet: vi.fn() }))
+vi.mock('../api/client', async () => {
+  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
+  return { ...actual, apiGet: vi.fn() }
+})
 
 const LONG_TIMEOUT = { timeout: 3000 }
 

@@ -8,6 +8,7 @@ import type {
   InvestigationResponse,
   MetricResult,
   MetricTableResponse,
+  ReleaseSummaryResponse,
   SessionDetail,
   SessionListResponse,
 } from '../api/types'
@@ -238,7 +239,69 @@ export function apiGetMockImpl(path: string, params?: Record<string, string | nu
   if (path === '/ai-quality/classifier-evaluation') return Promise.resolve(CLASSIFIER_EVALUATION_FIXTURE)
   if (path === '/sessions') return Promise.resolve(SESSION_LIST_FIXTURE)
   if (path.startsWith('/sessions/')) return Promise.resolve(SESSION_DETAIL_FIXTURE)
+  if (path === `/api/v1/domains/commerce/experiments/${EXPERIMENT_ID}/release-summary`) return Promise.resolve(RELEASE_SUMMARY_FIXTURE)
   return Promise.reject(new Error(`Unmocked path in test: ${path}`))
+}
+
+export const RELEASE_SUMMARY_FIXTURE: ReleaseSummaryResponse = {
+  decision: {
+    evaluation_id: 'eval-0001',
+    domain: 'commerce',
+    experiment_id: EXPERIMENT_ID,
+    primary_metric: 'abandonment_rate',
+    verdict: 'ROLLBACK',
+    raw_verdict: 'ROLLBACK',
+    primary_reason: "Largest excess contribution to the regression is segment 'requested_category=electronics'.",
+    primary_metric_v1: 0.2,
+    primary_metric_v2: 0.35,
+    primary_metric_delta: 0.15,
+    primary_metric_p_value: 0.0004,
+    breached_guardrails: [{ name: 'p95_latency', severity: 'blocking', v1_value: 1200, v2_value: 2100 }],
+    significant_negative_segment_count: 1,
+    data_quality_status: 'healthy',
+    data_quality_gated: false,
+    economics_impact: -0.42,
+    confidence: 'strong',
+  },
+  explanation_text: 'ROLLBACK because abandonment_rate increased by 15.0pp and p95_latency breached its blocking guardrail.',
+  evidence_hierarchy: [
+    { rank: 1, category: 'blocking_guardrail', summary: "Blocking guardrail 'p95_latency' breached (p95 latency increased beyond threshold): v1=1200, v2=2100." },
+    { rank: 2, category: 'primary_metric', summary: "Primary metric 'abandonment_rate' regressed by 15.0pp (p=4.00e-04)." },
+    { rank: 3, category: 'negative_segment', summary: "Segment 'requested_category=electronics' shows a negative excess contribution of -0.1200 (p=1.00e-05)." },
+    { rank: 4, category: 'economics', summary: 'Estimated business impact per session is -0.4200 (negative).' },
+    { rank: 5, category: 'failure_mechanism', summary: "Failure mechanism 'retrieval_failure' detected as the dominant contributor in segment 'requested_category=electronics'." },
+    { rank: 6, category: 'representative_session', summary: '1 representative session(s) selected across 1 segment(s) for detailed review.' },
+  ],
+  findings: [
+    {
+      segment_label: 'requested_category=electronics',
+      dimensions: ['requested_category'],
+      metric: 'abandonment_rate',
+      v1_value: 0.18,
+      v2_value: 0.4,
+      delta: 0.22,
+      p_value: 0.00001,
+      excess_contribution: -0.12,
+      dominant_failure_mode: 'retrieval_failure',
+      representative_session_ids: ['sess-0001-aaaa-bbbb-cccc-000000000001'],
+      next_action: 'Review retrieval quality for electronics-category queries before expanding rollout.',
+    },
+  ],
+  representative_sessions: [
+    {
+      session_id: 'sess-0001-aaaa-bbbb-cccc-000000000001',
+      segment_label: 'requested_category=electronics',
+      outcome: 'abandoned',
+      transcript_excerpt: [['user', 'I need a monitor under $300'], ['agent', 'Could you clarify your preferred screen size?']],
+      action_sequence: ['understand_query', 'clarify'],
+      detected_mechanisms: ['retrieval_failure'],
+      human_review_status: 'not_reviewed',
+      selected_because: "Sampled from the treatment arm, preferring sessions where the detected failure mechanism 'retrieval_failure' was present.",
+    },
+  ],
+  economics: { cost_per_session_v1: 0.5, cost_per_session_v2: 0.6, estimated_business_impact_per_session: -0.42 },
+  data_quality_status: 'healthy',
+  monitoring_window: { data_window_start: null, data_window_end: null, window_hours: null },
 }
 
 export const SESSION_DETAIL_FIXTURE: SessionDetail = {

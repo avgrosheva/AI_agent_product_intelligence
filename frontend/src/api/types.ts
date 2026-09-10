@@ -380,3 +380,77 @@ export interface ApiErrorBody {
   error_code: string
   detail: string
 }
+
+// -- Stage 14: release decision summary ------------------------------
+
+export type ReleaseVerdict = 'SHIP' | 'HOLD' | 'ROLLBACK'
+export type DataQualityStatus = 'healthy' | 'warning' | 'critical'
+export type Confidence = 'strong' | 'moderate' | 'weak' | 'insufficient_evidence'
+
+export interface DecisionSummary {
+  evaluation_id: string
+  domain: string
+  experiment_id: string
+  primary_metric: string
+  verdict: ReleaseVerdict
+  raw_verdict: ReleaseVerdict
+  primary_reason: string
+  primary_metric_v1: number | null
+  primary_metric_v2: number | null
+  primary_metric_delta: number | null
+  primary_metric_p_value: number | null
+  breached_guardrails: Record<string, unknown>[]
+  significant_negative_segment_count: number
+  data_quality_status: DataQualityStatus
+  data_quality_gated: boolean
+  economics_impact: number | null
+  confidence: Confidence
+}
+
+export interface EvidenceItem {
+  rank: number
+  category: string
+  summary: string
+}
+
+export interface FindingExplanation {
+  segment_label: string
+  dimensions: string[]
+  metric: string
+  v1_value: number | null
+  v2_value: number | null
+  delta: number | null
+  p_value: number | null
+  excess_contribution: number | null
+  dominant_failure_mode: string | null
+  representative_session_ids: string[]
+  next_action: string
+}
+
+export interface SessionEvidenceDetail {
+  session_id: string
+  segment_label: string
+  outcome: string
+  transcript_excerpt: string[][]
+  action_sequence: string[]
+  detected_mechanisms: string[]
+  human_review_status: 'reviewed' | 'not_reviewed'
+  selected_because: string
+}
+
+export interface MonitoringWindowInfo {
+  data_window_start: string | null
+  data_window_end: string | null
+  window_hours: number | null
+}
+
+export interface ReleaseSummaryResponse {
+  decision: DecisionSummary
+  explanation_text: string
+  evidence_hierarchy: EvidenceItem[]
+  findings: FindingExplanation[]
+  representative_sessions: SessionEvidenceDetail[]
+  economics: Record<string, unknown> | null
+  data_quality_status: DataQualityStatus
+  monitoring_window: MonitoringWindowInfo
+}

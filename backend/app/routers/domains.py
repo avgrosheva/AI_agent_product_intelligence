@@ -53,6 +53,7 @@ from backend.app.schemas.domain_generic import (
 )
 from backend.app.schemas.investigation import ExploredSegmentSummary, RecommendationSchema
 from backend.app.schemas.project_config import OnboardingStatusResponse, ProjectConfigRequest, ProjectConfigSchema
+from backend.app.schemas.release_summary import ReleaseSummaryResponse
 from backend.core.adapter import DomainAdapter
 from backend.core.config import load_metric_config_from_dict
 from backend.core.guardrails import evaluate_guardrails
@@ -64,6 +65,7 @@ from backend.project_config.service import existing_context_keys, get_project_co
 from backend.quality.service import compute_data_quality_report
 from backend.release.evidence import build_release_evidence
 from backend.release.service import evaluate_and_persist_release, get_latest_release_status, get_release_evaluation_by_id, list_release_history
+from backend.release.summary import build_release_summary
 from backend.review.service import get_reviews_for_session
 
 router = APIRouter(prefix="/api/v1/domains", tags=["generic-domain-api"])
@@ -457,4 +459,35 @@ def get_onboarding_status(domain: str, ctx: ProjectContext = Depends(get_project
         data_quality_status=quality.status,
         monitoring_enabled=any(c.enabled for c in monitoring_configs),
         notifications_configured=bool(channels) and bool(config and config.enabled_notification_rules),
+    )
+
+
+@router.get("/{domain}/experiments/{experiment_id}/release-summary", response_model=ReleaseSummaryResponse)
+def get_release_summary(domain: str, experiment_id: str, ctx: ProjectContext = Depends(get_project_context)) -> ReleaseSummaryResponse:
+    """Stage 14 task 5: one endpoint a UI needs for a complete decision
+    screen — decision summary, deterministic explanation, evidence
+    hierarchy, per-finding explanations, session-level evidence detail,
+    economics, data quality, and monitoring window provenance, all for
+    the LATEST release evaluation of this experiment. Nothing here is
+    computed fresh; backend.release.summary.build_release_summary reads
+    only what's already persisted/computed (task 2: no unsupported
+    explanations)."""
+    engine = get_engine()
+    evaluation = get_latest_release_status(engine, domain, experiment_id, project_id=ctx.project.project_id)
+    if evaluation is None:
+        raise HTTPException(status_code=404, detail=f"No release evaluation has been run yet for domain='{domain}' experiment_id='{experiment_id}'")
+
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
+    summary = build_release_summary(engine, adapter, evaluation)
+    return ReleaseSummaryResponse(
+        decision=summary.decision.__dict__,
+        explanation_text=summary.explanation_text,
+        evidence_hierarchy=[e.__dict__ for e in summary.evidence_hierarchy],
+        findings=[{**f.__dict__, "dimensions": list(f.dimensions)} for f in summary.findings],
+        representative_sessions=[
+            {**s.__dict__, "transcript_excerpt": [list(t) for t in s.transcript_excerpt]} for s in summary.representative_sessions
+        ],
+        economics=summary.economics,
+        data_quality_status=summary.data_quality_status,
+        monitoring_window=summary.monitoring_window.__dict__,
     )
