@@ -20,6 +20,8 @@ endpoints additionally require the "analyst" role or higher.
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.analytics.experiment_results import analyze_all_metrics
@@ -50,10 +52,15 @@ from backend.app.schemas.domain_generic import (
     SessionEvidenceSchema,
 )
 from backend.app.schemas.investigation import ExploredSegmentSummary, RecommendationSchema
+from backend.app.schemas.project_config import OnboardingStatusResponse, ProjectConfigRequest, ProjectConfigSchema
 from backend.core.adapter import DomainAdapter
+from backend.core.config import load_metric_config_from_dict
 from backend.core.guardrails import evaluate_guardrails
 from backend.core.investigation_config import investigation_config_from_adapter
 from backend.investigation.pipeline import run_investigation
+from backend.monitoring.service import list_monitoring_configs
+from backend.notifications.service import list_channels as list_notification_channels
+from backend.project_config.service import existing_context_keys, get_project_config, upsert_project_config, validate_project_config
 from backend.quality.service import compute_data_quality_report
 from backend.release.evidence import build_release_evidence
 from backend.release.service import evaluate_and_persist_release, get_latest_release_status, get_release_evaluation_by_id, list_release_history
@@ -254,15 +261,26 @@ def get_domain_session_detail(domain: str, session_id: str, ctx: ProjectContext 
 def create_release_evaluation(
     domain: str,
     experiment_id: str,
-    primary_metric: str = Query(..., description="Required: one of this domain's implemented, inferential metrics."),
+    primary_metric: str | None = Query(default=None, description="One of this domain's implemented, inferential metrics. Optional if this project has a persisted default (Stage 12 task 4)."),
     ctx: ProjectContext = Depends(require_role("analyst")),
 ) -> ReleaseEvaluationSchema:
     """Stage 5 task 4: evaluate this experiment RIGHT NOW (no scheduling)
     and persist the result — every call appends a new release_evaluations
     row, so calling this repeatedly builds the release history task 3
-    asks for. Stage 7 task 3: requires "analyst" role or higher."""
+    asks for. Stage 7 task 3: requires "analyst" role or higher.
+
+    Stage 12 task 4: `primary_metric` falls back to this project's
+    persisted config default when omitted, so an onboarded project's
+    callers don't have to keep naming it — a project with neither an
+    explicit query param nor a persisted default still gets a clear 422."""
     adapter = get_adapter(domain, project_id=ctx.project.project_id)
     _experiment_or_404(adapter, experiment_id)
+
+    if primary_metric is None:
+        config = get_project_config(get_engine(), ctx.project.project_id)
+        primary_metric = config.primary_metric if config else None
+        if primary_metric is None:
+            raise HTTPException(status_code=422, detail="primary_metric is required (no persisted default configured for this project — see PUT .../config)")
     _validate_primary_metric(adapter, primary_metric)
 
     result = evaluate_and_persist_release(get_engine(), domain, experiment_id, adapter, primary_metric, project_id=ctx.project.project_id)
@@ -346,4 +364,97 @@ def get_data_quality_report(domain: str, ctx: ProjectContext = Depends(get_proje
         status=report.status,
         generated_at=report.generated_at,
         checks=[{"name": c.name, "value": c.value, "status": c.status, "detail": c.detail} for c in report.checks],
+    )
+
+
+def _config_schema(project_id: str, config) -> ProjectConfigSchema:
+    if config is None:
+        return ProjectConfigSchema(
+            project_id=project_id, primary_metric=None, metrics=None, guardrails=None, segment_dimensions=None,
+            economics=None, monitoring_cadence_seconds=None, enabled_notification_rules=[], created_at=None, updated_at=None,
+        )
+    return ProjectConfigSchema(**config.__dict__)
+
+
+@router.get("/{domain}/config", response_model=ProjectConfigSchema)
+def get_config(domain: str, ctx: ProjectContext = Depends(get_project_context)) -> ProjectConfigSchema:
+    """Stage 12 task 4: this project's persisted configuration. A project
+    that has never saved one gets an all-null shell back, not a 404 —
+    the domain's static defaults are already in effect either way."""
+    config = get_project_config(get_engine(), ctx.project.project_id)
+    return _config_schema(ctx.project.project_id, config)
+
+
+@router.put("/{domain}/config", response_model=ProjectConfigSchema)
+def put_config(domain: str, request: ProjectConfigRequest, ctx: ProjectContext = Depends(require_role("analyst"))) -> ProjectConfigSchema:
+    """Stage 12 tasks 4-5: full-replace upsert. Any field left out (None)
+    means "no override" — the domain's static default applies, same as
+    before this project ever configured anything (task 7). Returns 422
+    with the actionable validation issue list on any problem; nothing is
+    saved when validation fails."""
+    engine = get_engine()
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
+
+    if request.metrics is not None:
+        try:
+            defs, _ = load_metric_config_from_dict(request.metrics)
+            effective_metric_names = {d.name for d in defs}
+        except (KeyError, ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=json.dumps([{"field": "metrics", "message": f"invalid metrics config: {exc}"}])) from exc
+    else:
+        effective_metric_names = {m.name for m in adapter.metric_definitions()}
+
+    issues = validate_project_config(
+        primary_metric=request.primary_metric,
+        metrics_json=request.metrics,
+        guardrails_json=request.guardrails,
+        segment_dimensions_json=request.segment_dimensions,
+        economics_json=request.economics,
+        enabled_notification_rules=request.enabled_notification_rules,
+        effective_metric_names=effective_metric_names,
+        known_context_keys=existing_context_keys(engine, ctx.project.project_id, domain),
+    )
+    if issues:
+        raise HTTPException(status_code=422, detail=json.dumps([{"field": i.field, "message": i.message} for i in issues]))
+
+    result = upsert_project_config(
+        engine, ctx.project.project_id, primary_metric=request.primary_metric, metrics_json=request.metrics,
+        guardrails_json=request.guardrails, segment_dimensions_json=request.segment_dimensions, economics_json=request.economics,
+        monitoring_cadence_seconds=request.monitoring_cadence_seconds, enabled_notification_rules=request.enabled_notification_rules,
+    )
+    return _config_schema(ctx.project.project_id, result)
+
+
+@router.get("/{domain}/onboarding-status", response_model=OnboardingStatusResponse)
+def get_onboarding_status(domain: str, ctx: ProjectContext = Depends(get_project_context)) -> OnboardingStatusResponse:
+    """Stage 12 task 6: is this project ready for analysis? Every field
+    here is a direct read of already-existing state — no new checks
+    invented beyond what backend.quality/backend.monitoring/backend.
+    notifications already compute and store."""
+    engine = get_engine()
+    project_id = ctx.project.project_id
+    adapter = get_adapter(domain, project_id=project_id)
+
+    has_experiments = len(adapter.list_experiments()) > 0
+    config = get_project_config(engine, project_id)
+    # There is no static "default primary metric" concept for commerce/
+    # support (a caller always names one per release-evaluation call) --
+    # this is honestly reported as "not configured" until a project
+    # explicitly sets one, even though those domains work fine without it.
+    primary_metric_configured = bool(config and config.primary_metric)
+    guardrails_configured = len(adapter.guardrails()) > 0
+    quality = compute_data_quality_report(engine, project_id, domain)
+    monitoring_configs = list_monitoring_configs(engine, project_id)
+    channels = list_notification_channels(engine, project_id, enabled_only=True)
+
+    return OnboardingStatusResponse(
+        project_id=project_id,
+        domain=domain,
+        ingestion_connected=True,  # an authenticated call against a real project proves the ingestion API is reachable
+        data_received=has_experiments,
+        primary_metric_configured=primary_metric_configured,
+        guardrails_configured=guardrails_configured,
+        data_quality_status=quality.status,
+        monitoring_enabled=any(c.enabled for c in monitoring_configs),
+        notifications_configured=bool(channels) and bool(config and config.enabled_notification_rules),
     )

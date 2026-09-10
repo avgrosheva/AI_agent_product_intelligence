@@ -45,7 +45,14 @@ def load_metric_config(path: str | Path) -> tuple[list[MetricDefinition], dict[s
     """Returns (metric_definitions, metric_value_columns) — the exact two
     shapes DomainAdapter.metric_definitions()/metric_value_columns()
     already return, so analyze_metric() does not change."""
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return load_metric_config_from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def load_metric_config_from_dict(data: dict) -> tuple[list[MetricDefinition], dict[str, tuple[str, object]]]:
+    """Stage 12 task 4: the same {"metrics": [...]} shape load_metric_config
+    reads from a file, but already parsed — lets a persisted per-project
+    config (backend.project_config) reuse this exact, already-reviewed
+    parsing/validation logic instead of a second implementation."""
     definitions: list[MetricDefinition] = []
     value_columns: dict[str, tuple[str, object]] = {}
 
@@ -82,7 +89,12 @@ def load_metric_config(path: str | Path) -> tuple[list[MetricDefinition], dict[s
 
 
 def load_guardrail_config(path: str | Path) -> list[GuardrailDefinition]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return load_guardrail_config_from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def load_guardrail_config_from_dict(data: dict) -> list[GuardrailDefinition]:
+    """Stage 12 task 4: dict-input counterpart to load_guardrail_config,
+    for the same reason as load_metric_config_from_dict above."""
     return [
         GuardrailDefinition(
             name=entry["name"],

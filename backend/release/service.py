@@ -249,6 +249,13 @@ def evaluate_and_persist_release(
 
     generate_alerts_for_evaluation(engine, domain, experiment_id, persisted.evaluation_id, persisted.status, fields, primary_metric_name, project_id=project_id)
 
+    # Stage 12 task 2: notifications, same synchronous-right-after-
+    # persistence pattern as alerts above, from the SAME already-computed
+    # `persisted` result — no new decision logic.
+    from backend.notifications.service import dispatch_release_notifications
+
+    dispatch_release_notifications(engine, project_id, persisted)
+
     return persisted
 
 

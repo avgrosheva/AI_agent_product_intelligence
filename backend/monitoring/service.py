@@ -167,7 +167,14 @@ def run_monitoring_job(engine: Engine, config: MonitoringConfigResult, adapter_f
                 session.query(MonitoringRun).filter(MonitoringRun.run_id == run_id).update({"status": "failed", "completed_at": completed_at, "failure_reason": reason})
                 session.commit()
                 updated = session.query(MonitoringRun).filter(MonitoringRun.run_id == run_id).one()
-                return _run_to_result(updated)
+                result = _run_to_result(updated)
+
+            # Stage 12 task 2: notify off the failure this job just
+            # recorded above -- no new decision logic, just reading it back.
+            from backend.notifications.service import dispatch_monitoring_failure_notification
+
+            dispatch_monitoring_failure_notification(engine, config.project_id, str(run_id), config, reason)
+            return result
     finally:
         try:
             conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})

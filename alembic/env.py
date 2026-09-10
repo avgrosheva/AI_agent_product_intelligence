@@ -12,6 +12,8 @@ import backend.review.models  # noqa: F401 -- registers the attribution_reviews 
 import backend.auth.models  # noqa: F401 -- registers users/organizations/memberships/projects onto Base.metadata for autogenerate
 import backend.monitoring.models  # noqa: F401 -- registers monitoring_configs/monitoring_runs onto Base.metadata for autogenerate
 import backend.quality.models  # noqa: F401 -- registers connector_runs onto Base.metadata for autogenerate
+import backend.project_config.models  # noqa: F401 -- registers project_configs onto Base.metadata for autogenerate
+import backend.notifications.models  # noqa: F401 -- registers notification_channels/notification_deliveries onto Base.metadata for autogenerate
 
 config = context.config
 

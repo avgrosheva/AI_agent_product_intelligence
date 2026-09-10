@@ -87,19 +87,43 @@ class CommerceAdapter:
             raise KeyError(f"no commerce session found for session_id={session_id!r}")
         return contexts[0]
 
+    def _metrics_override(self):
+        # Stage 12 task 4/7: a project's own persisted metrics config
+        # (backend.project_config) takes priority when present; absent
+        # one (the common case today), behavior is unchanged.
+        if self._engine is None or self._project_id is None:
+            return None
+        from backend.project_config.overrides import metrics_override
+
+        return metrics_override(self._engine, self._project_id)
+
     def metric_definitions(self) -> list[MetricDefinition]:
-        return list(metric_registry.METRIC_REGISTRY)
+        override = self._metrics_override()
+        return override[0] if override is not None else list(metric_registry.METRIC_REGISTRY)
 
     def metric_value_columns(self) -> dict[str, tuple[str, object]]:
-        return METRIC_VALUE_COLUMNS
+        override = self._metrics_override()
+        return override[1] if override is not None else METRIC_VALUE_COLUMNS
 
     def guardrails(self) -> list[GuardrailDefinition]:
+        if self._engine is not None and self._project_id is not None:
+            from backend.project_config.overrides import guardrails_override
+
+            override = guardrails_override(self._engine, self._project_id)
+            if override is not None:
+                return override
         return COMMERCE_GUARDRAILS
 
     def mechanisms(self) -> MechanismRegistry:
         return COMMERCE_MECHANISMS
 
     def segment_dimensions(self) -> dict[str, list[str]]:
+        if self._engine is not None and self._project_id is not None:
+            from backend.project_config.overrides import segment_dimensions_override
+
+            override = segment_dimensions_override(self._engine, self._project_id)
+            if override is not None:
+                return override
         return DIMENSION_VALUES
 
     def pairwise_segment_allowlist(self) -> list[tuple[str, str]]:
@@ -167,6 +191,12 @@ class CommerceAdapter:
         )
 
     def economics_config(self) -> EconomicsConfig:
+        if self._engine is not None and self._project_id is not None:
+            from backend.project_config.overrides import economics_override
+
+            override = economics_override(self._engine, self._project_id)
+            if override is not None:
+                return override
         return EconomicsConfig(cost_column="total_cost_usd", success_column="converted", value_column="revenue_usd")
 
     def list_reviewable_attributions(self, experiment_id: str | None = None, session_id: str | None = None) -> list[ReviewableAttribution]:

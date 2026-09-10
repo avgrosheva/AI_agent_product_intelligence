@@ -172,19 +172,43 @@ class SupportAdapter:
             outcome=session_row["outcome_label"],
         )
 
+    def _metrics_override(self):
+        # Stage 12 task 4/7: a project's own persisted metrics config
+        # (backend.project_config) takes priority over this domain's
+        # static metrics.json; absent one, behavior is unchanged.
+        if self._engine is None or self._project_id is None:
+            return None
+        from backend.project_config.overrides import metrics_override
+
+        return metrics_override(self._engine, self._project_id)
+
     def metric_definitions(self) -> list[MetricDefinition]:
-        return list(SUPPORT_METRIC_REGISTRY)
+        override = self._metrics_override()
+        return override[0] if override is not None else list(SUPPORT_METRIC_REGISTRY)
 
     def metric_value_columns(self) -> dict[str, tuple[str, object]]:
-        return SUPPORT_METRIC_VALUE_COLUMNS
+        override = self._metrics_override()
+        return override[1] if override is not None else SUPPORT_METRIC_VALUE_COLUMNS
 
     def guardrails(self) -> list[GuardrailDefinition]:
+        if self._engine is not None and self._project_id is not None:
+            from backend.project_config.overrides import guardrails_override
+
+            override = guardrails_override(self._engine, self._project_id)
+            if override is not None:
+                return override
         return SUPPORT_GUARDRAILS
 
     def mechanisms(self) -> MechanismRegistry:
         return SUPPORT_MECHANISMS
 
     def segment_dimensions(self) -> dict[str, list[str]]:
+        if self._engine is not None and self._project_id is not None:
+            from backend.project_config.overrides import segment_dimensions_override
+
+            override = segment_dimensions_override(self._engine, self._project_id)
+            if override is not None:
+                return override
         return SEGMENT_DIMENSION_VALUES
 
     def pairwise_segment_allowlist(self) -> list[tuple[str, str]]:
@@ -266,4 +290,10 @@ class SupportAdapter:
         # backend.economics.compute.compute_economics checks column
         # presence itself and returns null fields rather than raising when
         # a particular batch didn't include them (Stage 7 task 6).
+        if self._engine is not None and self._project_id is not None:
+            from backend.project_config.overrides import economics_override
+
+            override = economics_override(self._engine, self._project_id)
+            if override is not None:
+                return override
         return EconomicsConfig(cost_column="cost_usd", success_column="resolved", value_column="revenue_usd")
