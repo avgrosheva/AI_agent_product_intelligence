@@ -21,6 +21,7 @@ way without touching this file.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal, Sequence
 
 MechanismSource = Literal["deterministic", "semantic"]
@@ -33,7 +34,15 @@ class ReviewableAttribution:
     element type. A domain with no attribution storage of its own (support
     — Stage 3 task 7: zero registered mechanisms) simply returns an empty
     list; nothing downstream (the review queue, session-detail review
-    fields) special-cases that, it's just an empty result."""
+    fields) special-cases that, it's just an empty result.
+
+    Stage 19 task 1/8: detector_version/provider/model/prompt_version are
+    the SAME provenance columns the classifier-evaluation benchmark
+    already reads (backend.llm.provenance) — plumbed through here too so
+    quality-over-time tracking and the version-level provenance UI can
+    group/join human review outcomes by exactly which detector version
+    and (for semantic mechanisms) which model/prompt produced the
+    original call, without a second, parallel provenance path."""
 
     session_id: str
     experiment_id: str
@@ -42,6 +51,11 @@ class ReviewableAttribution:
     detector_source: str
     confidence: float | None
     evidence_text: str | None
+    detector_version: str
+    provider: str | None
+    model: str | None
+    prompt_version: str | None
+    created_at: datetime
 
 
 @dataclass(frozen=True)

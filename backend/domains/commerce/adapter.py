@@ -249,7 +249,8 @@ class CommerceAdapter:
         query = (
             "SELECT sfa.session_id::text AS session_id, s.experiment_id::text AS experiment_id, "
             "s.agent_version::text AS agent_version, sfa.failure_mode::text AS failure_mode, "
-            "sfa.detector_source::text AS detector_source, sfa.confidence, sfa.evidence_text "
+            "sfa.detector_source::text AS detector_source, sfa.confidence, sfa.evidence_text, "
+            "sfa.detector_version, sfa.provider, sfa.model, sfa.prompt_version, sfa.created_at "
             "FROM session_failure_attributions sfa JOIN sessions s ON s.session_id = sfa.session_id "
         )
         if self._project_id is not None:
@@ -272,6 +273,8 @@ class CommerceAdapter:
                 session_id=r["session_id"], experiment_id=r["experiment_id"], agent_version=r["agent_version"],
                 failure_mode=r["failure_mode"], detector_source=r["detector_source"],
                 confidence=r["confidence"], evidence_text=r["evidence_text"],
+                detector_version=r["detector_version"], provider=r["provider"], model=r["model"], prompt_version=r["prompt_version"],
+                created_at=r["created_at"],
             )
             for r in rows
         ]

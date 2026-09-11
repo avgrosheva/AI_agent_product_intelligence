@@ -40,6 +40,10 @@ from backend.app.investigation_serialization import finding_to_schema
 from backend.audit.service import record_audit_event
 from backend.app.schemas.common import metric_result_to_schema
 from backend.app.schemas.domain_generic import (
+    ConfidenceBucketQualitySchema,
+    ConfusionPairSchema,
+    DisagreementItemSchema,
+    DetectorSourceQualitySchema,
     GenericAIQualitySummaryResponse,
     GenericExperimentListResponse,
     GenericExperimentSummary,
@@ -58,16 +62,20 @@ from backend.app.schemas.domain_generic import (
     GenericToolCallSchema,
     GenericToolUseQuality,
     GenericTrajectoryPatternItem,
+    HumanReviewQualityReport,
     MechanismListResponse,
+    MechanismQualitySchema,
     MechanismSchema,
     DataQualityReportResponse,
     LinkedMechanismSchema,
     NegativeSegmentEvidenceSchema,
+    QualityCountsSchema,
     ReleaseEvaluationSchema,
     ReleaseEvidenceResponse,
     ReleaseHistoryResponse,
     SegmentDimensionsResponse,
     SessionEvidenceSchema,
+    VersionQualityBucketSchema,
 )
 from backend.app.schemas.investigation import ExploredSegmentSummary, RecommendationSchema
 from backend.app.schemas.project_config import (
@@ -91,6 +99,7 @@ from backend.quality.service import compute_data_quality_report
 from backend.release.evidence import build_release_evidence
 from backend.release.service import evaluate_and_persist_release, get_latest_release_status, get_release_evaluation_by_id, list_release_history
 from backend.release.summary import build_release_summary
+from backend.review.quality import MIN_REVIEWS_FOR_QUALITY_CLAIM, compute_attribution_quality, compute_disagreement_analysis, compute_quality_by_version
 from backend.review.service import count_reviews_by_mechanism, get_reviews_for_session, list_reviews_for_sessions
 
 router = APIRouter(prefix="/api/v1/domains", tags=["generic-domain-api"])
@@ -371,6 +380,60 @@ def get_domain_segment_dimensions(domain: str, ctx: ProjectContext = Depends(get
     return SegmentDimensionsResponse(domain=domain, dimensions=adapter.segment_dimensions())
 
 
+def _human_review_quality_report(engine, domain: str, project_id: str, attributions: list) -> HumanReviewQualityReport:
+    """Stage 19 tasks 1/2/3/4: real human-review-based quality for this
+    experiment's reviewable attributions -- distinct from, and shown
+    alongside, the offline classifier benchmark
+    (ClassifierEvaluationResponse.hybrid_evaluation). Every rate here is
+    over REVIEWED items only (compute_attribution_quality never counts
+    an unreviewed attribution as correct or incorrect)."""
+    session_ids = {a.session_id for a in attributions}
+    reviews_by_session = list_reviews_for_sessions(engine, domain, session_ids, project_id=project_id)
+    reviews_by_key = {(sid, mode): review for sid, by_mode in reviews_by_session.items() for mode, review in by_mode.items()}
+
+    quality = compute_attribution_quality(attributions, reviews_by_key)
+    by_version = compute_quality_by_version(attributions, reviews_by_key)
+    disagreement = compute_disagreement_analysis(attributions, reviews_by_key)
+
+    def _counts_schema(c) -> QualityCountsSchema:
+        return QualityCountsSchema(
+            reviewed_count=c.reviewed_count, confirmed_count=c.confirmed_count, rejected_count=c.rejected_count,
+            corrected_count=c.corrected_count, confirmation_rate=c.confirmation_rate, correction_rate=c.correction_rate,
+            sample_status=c.sample_status,
+        )
+
+    return HumanReviewQualityReport(
+        overall=_counts_schema(quality.overall),
+        by_mechanism=[MechanismQualitySchema(failure_mode=m.failure_mode, detector_source=m.detector_source, counts=_counts_schema(m.counts)) for m in quality.by_mechanism],
+        by_detector_source=[DetectorSourceQualitySchema(detector_source=s.detector_source, counts=_counts_schema(s.counts)) for s in quality.by_detector_source],
+        by_confidence_bucket=[
+            ConfidenceBucketQualitySchema(bucket_label=b.bucket_label, bucket_min=b.bucket_min, bucket_max=b.bucket_max, counts=_counts_schema(b.counts))
+            for b in quality.by_confidence_bucket
+        ],
+        by_version=[
+            VersionQualityBucketSchema(
+                detector_version=v.detector_version, provider=v.provider, model=v.model, prompt_version=v.prompt_version,
+                first_seen=v.first_seen, last_seen=v.last_seen, counts=_counts_schema(v.counts),
+            )
+            for v in by_version
+        ],
+        disagreement_items=[
+            DisagreementItemSchema(
+                session_id=i.session_id, experiment_id=i.experiment_id, original_mechanism=i.original_mechanism,
+                corrected_mechanism=i.corrected_mechanism, original_confidence=i.original_confidence, detector_source=i.detector_source,
+                detector_version=i.detector_version, provider=i.provider, model=i.model, prompt_version=i.prompt_version,
+                reviewed_at=i.reviewed_at,
+            )
+            for i in disagreement.items
+        ],
+        confusion_pairs=[
+            ConfusionPairSchema(original_mechanism=p.original_mechanism, corrected_mechanism=p.corrected_mechanism, count=p.count)
+            for p in disagreement.confusion_pairs
+        ],
+        min_reviews_threshold=MIN_REVIEWS_FOR_QUALITY_CLAIM,
+    )
+
+
 @router.get("/{domain}/experiments/{experiment_id}/ai-quality", response_model=GenericAIQualitySummaryResponse)
 def get_domain_ai_quality(domain: str, experiment_id: str, ctx: ProjectContext = Depends(get_project_context)) -> GenericAIQualitySummaryResponse:
     """Reuses the exact computation backend.app.routers.ai_quality.
@@ -390,9 +453,10 @@ def get_domain_ai_quality(domain: str, experiment_id: str, ctx: ProjectContext =
     v2_mask = base_df["agent_version"] == "v2"
     n_v1, n_v2 = int(v1_mask.sum()), int(v2_mask.sum())
 
+    attributions = adapter.list_reviewable_attributions(experiment_id=experiment_id)
     counts: dict[str, dict[str, int]] = {}
     sources: dict[str, str] = {}
-    for a in adapter.list_reviewable_attributions(experiment_id=experiment_id):
+    for a in attributions:
         by_version = counts.setdefault(a.failure_mode, {})
         by_version[a.agent_version] = by_version.get(a.agent_version, 0) + 1
         sources[a.failure_mode] = a.detector_source
@@ -451,9 +515,12 @@ def get_domain_ai_quality(domain: str, experiment_id: str, ctx: ProjectContext =
             )
         traj_items.sort(key=lambda t: t.n_sessions_v1 + t.n_sessions_v2, reverse=True)
 
+    human_review_quality = _human_review_quality_report(get_engine(), domain, ctx.project.project_id, attributions)
+
     return GenericAIQualitySummaryResponse(
         domain=domain, experiment_id=experiment_id,
         failure_mechanism_prevalence=prevalence, tool_use_quality=tool_use, trajectory_patterns=traj_items,
+        human_review_quality=human_review_quality,
     )
 
 
@@ -571,6 +638,9 @@ def get_domain_session_detail(domain: str, session_id: str, ctx: ProjectContext 
             review_status=(reviews_by_mode[a.failure_mode].decision if a.failure_mode in reviews_by_mode else "unreviewed"),
             corrected_mechanism=(reviews_by_mode[a.failure_mode].corrected_mechanism if a.failure_mode in reviews_by_mode else None),
             review_note=(reviews_by_mode[a.failure_mode].note if a.failure_mode in reviews_by_mode else None),
+            detector_version=a.detector_version, provider=a.provider, model=a.model, prompt_version=a.prompt_version,
+            reviewer=(reviews_by_mode[a.failure_mode].reviewer if a.failure_mode in reviews_by_mode else None),
+            reviewed_at=(reviews_by_mode[a.failure_mode].updated_at if a.failure_mode in reviews_by_mode else None),
         )
         for a in attributions
     ]

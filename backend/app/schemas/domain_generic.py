@@ -141,6 +141,16 @@ class GenericFailureAttributionSchema(BaseModel):
     review_status: Literal["unreviewed", "confirmed", "rejected"] = "unreviewed"
     corrected_mechanism: str | None = None
     review_note: str | None = None
+    # Stage 19 task 8: version-level provenance for this ONE attribution
+    # -- which detector/model/prompt actually produced it -- plus who
+    # reviewed it and when, so a reviewed attribution's full context is
+    # visible in one place without cross-referencing anything else.
+    detector_version: str = ""
+    provider: str | None = None
+    model: str | None = None
+    prompt_version: str | None = None
+    reviewer: str | None = None
+    reviewed_at: datetime | None = None
 
 
 class GenericSessionDetailResponse(BaseModel):
@@ -280,12 +290,90 @@ class GenericTrajectoryPatternItem(BaseModel):
     negative_outcome_rate_v2: float
 
 
+# -- Stage 19: human-review-based attribution quality (distinct from,
+# and shown alongside, the offline classifier benchmark in
+# ClassifierEvaluationResponse -- that one measures the classifier
+# against held-out ground truth; this one measures it against what real
+# reviewers actually decided in this project, task 5's "A) offline
+# benchmark quality B) real human-review quality" distinction). ----------
+
+
+class QualityCountsSchema(BaseModel):
+    reviewed_count: int
+    confirmed_count: int
+    rejected_count: int
+    corrected_count: int
+    confirmation_rate: float | None
+    correction_rate: float | None
+    sample_status: Literal["insufficient_review_data", "enough_data"]
+
+
+class MechanismQualitySchema(BaseModel):
+    failure_mode: str
+    detector_source: str
+    counts: QualityCountsSchema
+
+
+class DetectorSourceQualitySchema(BaseModel):
+    detector_source: str
+    counts: QualityCountsSchema
+
+
+class ConfidenceBucketQualitySchema(BaseModel):
+    bucket_label: str
+    bucket_min: float
+    bucket_max: float
+    counts: QualityCountsSchema
+
+
+class VersionQualityBucketSchema(BaseModel):
+    detector_version: str
+    provider: str | None
+    model: str | None
+    prompt_version: str | None
+    first_seen: datetime
+    last_seen: datetime
+    counts: QualityCountsSchema
+
+
+class ConfusionPairSchema(BaseModel):
+    original_mechanism: str
+    corrected_mechanism: str
+    count: int
+
+
+class DisagreementItemSchema(BaseModel):
+    session_id: str
+    experiment_id: str
+    original_mechanism: str
+    corrected_mechanism: str | None
+    original_confidence: float | None
+    detector_source: str
+    detector_version: str
+    provider: str | None
+    model: str | None
+    prompt_version: str | None
+    reviewed_at: datetime
+
+
+class HumanReviewQualityReport(BaseModel):
+    overall: QualityCountsSchema
+    by_mechanism: list[MechanismQualitySchema]
+    by_detector_source: list[DetectorSourceQualitySchema]
+    by_confidence_bucket: list[ConfidenceBucketQualitySchema]
+    by_version: list[VersionQualityBucketSchema]
+    disagreement_items: list[DisagreementItemSchema]
+    confusion_pairs: list[ConfusionPairSchema]
+    min_reviews_threshold: int
+
+
 class GenericAIQualitySummaryResponse(BaseModel):
     domain: str
     experiment_id: str
     failure_mechanism_prevalence: list[GenericFailureMechanismPrevalenceItem]
     tool_use_quality: GenericToolUseQuality
     trajectory_patterns: list[GenericTrajectoryPatternItem]
+    human_review_quality: HumanReviewQualityReport
 
 
 class DataQualityCheckSchema(BaseModel):

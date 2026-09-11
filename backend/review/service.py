@@ -60,6 +60,15 @@ class ReviewQueueItem:
     evidence_text: str | None
     review: ReviewResult | None  # None means unreviewed
     high_impact: bool = False
+    # Stage 19 task 6/8: carried through for both prioritization (is
+    # this item on the newest detector/model/prompt version for its
+    # mechanism, which has no confirmation-rate track record yet?) and
+    # for showing provenance in the UI while reviewing.
+    detector_version: str = ""
+    provider: str | None = None
+    model: str | None = None
+    prompt_version: str | None = None
+    is_newest_version: bool = False
 
 
 def _row_to_result(row: AttributionReview) -> ReviewResult:
@@ -222,14 +231,31 @@ def list_review_queue(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[ReviewQueueItem], int]:
-    """Stage 7 task 7: ordered by (connected to a significant finding,
-    then confidence) descending, both proxies for "impact" — a session
-    inside a segment the Investigation engine already flagged as a
-    material regression outranks one that merely has a high-confidence
-    detector score. `latest_top_findings` is the calling router's already
-    -fetched latest release evaluation's top_findings (or None if no
-    evaluation has run yet / no experiment_id given — falls back to
-    confidence-only ordering, exactly Stage 6's behavior)."""
+    """Stage 19 task 6 (superseding Stage 7 task 7's confidence-only
+    tiebreak): ordered by, in priority order —
+      1. the item's mechanism's confirmation rate, ascending (mechanisms
+         the team is confirming LEAST often need the most review
+         attention; a mechanism with too few reviews to have a real rate
+         yet is treated as needing MORE review, ranked ahead of every
+         mechanism with an established rate — see
+         backend.review.quality.QualityCounts.sample_status),
+      2. whether the item sits on the newest detector/model/prompt
+         version introduced for its mechanism (a fresh version has no
+         track record yet and benefits from being reviewed first —
+         backend.review.quality.newest_version_per_mechanism),
+      3. connected to a significant Investigation finding ("high
+         impact" — Stage 7 task 7's original signal, kept, not replaced),
+      4. highest detector confidence (None sorts last),
+      5. session_id, as a final deterministic tiebreaker.
+    Every one of these is computed from data already fetched for this
+    same call (the reviewable attributions and their reviews) — no
+    additional queries, and the whole chain is one stable sort, so the
+    ordering is fully reproducible for the same underlying data.
+    `latest_top_findings` is the calling router's already-fetched latest
+    release evaluation's top_findings (or None if no evaluation has run
+    yet / no experiment_id given)."""
+    from backend.review.quality import compute_attribution_quality, newest_version_per_mechanism
+
     attributions = adapter.list_reviewable_attributions(experiment_id=experiment_id)
     if mechanism is not None:
         attributions = [a for a in attributions if a.failure_mode == mechanism]
@@ -246,21 +272,39 @@ def list_review_queue(
             rows = session.execute(stmt).scalars().all()
         reviews_by_key = {(r.session_id, r.failure_mode): _row_to_result(r) for r in rows}
 
+    quality = compute_attribution_quality(attributions, reviews_by_key)
+    # A mechanism with too few reviews to have a real confirmation rate
+    # (sample_status == "insufficient_review_data") is ranked as if its
+    # rate were below every ACTUAL rate (which is >= 0.0) -- -1.0 always
+    # sorts first ascending, prioritizing it for more review.
+    confirmation_rate_by_mechanism = {
+        m.failure_mode: (m.counts.confirmation_rate if m.counts.sample_status == "enough_data" else -1.0) for m in quality.by_mechanism
+    }
+    newest_version = newest_version_per_mechanism(attributions)
+
     items = [
         ReviewQueueItem(
             session_id=a.session_id, experiment_id=a.experiment_id, agent_version=a.agent_version,
             failure_mode=a.failure_mode, detector_source=a.detector_source, confidence=a.confidence,
             evidence_text=a.evidence_text, review=reviews_by_key.get((a.session_id, a.failure_mode)),
             high_impact=a.session_id in high_impact_ids,
+            detector_version=a.detector_version, provider=a.provider, model=a.model, prompt_version=a.prompt_version,
+            is_newest_version=newest_version.get(a.failure_mode) == (a.detector_version, a.provider or "", a.model or "", a.prompt_version or ""),
         )
         for a in attributions
     ]
     if unreviewed_only:
         items = [i for i in items if i.review is None]
 
-    # High-impact sessions first, then highest confidence (None sorts
-    # last); stable by session_id as a deterministic final tiebreaker.
-    items.sort(key=lambda i: (not i.high_impact, -(i.confidence if i.confidence is not None else -1), i.session_id))
+    items.sort(
+        key=lambda i: (
+            confirmation_rate_by_mechanism.get(i.failure_mode, -1.0),
+            not i.is_newest_version,
+            not i.high_impact,
+            -(i.confidence if i.confidence is not None else -1),
+            i.session_id,
+        )
+    )
 
     total = len(items)
     return items[offset : offset + limit], total

@@ -43,6 +43,12 @@ class ReviewQueueItemSchema(BaseModel):
     evidence_text: str | None
     reviewed: bool
     high_impact: bool = False
+    # Stage 19 task 6/8: provenance + why this item was prioritized.
+    detector_version: str = ""
+    provider: str | None = None
+    model: str | None = None
+    prompt_version: str | None = None
+    is_newest_version: bool = False
 
 
 class ReviewQueueResponse(BaseModel):

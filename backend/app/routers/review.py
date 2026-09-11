@@ -93,6 +93,8 @@ def get_review_queue(
                 session_id=i.session_id, experiment_id=i.experiment_id, agent_version=i.agent_version,
                 failure_mode=i.failure_mode, detector_source=i.detector_source, confidence=i.confidence,
                 evidence_text=i.evidence_text, reviewed=i.review is not None, high_impact=i.high_impact,
+                detector_version=i.detector_version, provider=i.provider, model=i.model, prompt_version=i.prompt_version,
+                is_newest_version=i.is_newest_version,
             )
             for i in items
         ],
