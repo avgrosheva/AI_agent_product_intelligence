@@ -8,6 +8,8 @@ import { ReleaseDecision } from './pages/ReleaseDecision'
 import { Sessions } from './pages/Sessions'
 import { SessionDetail } from './pages/SessionDetail'
 import { AIQuality } from './pages/AIQuality'
+import { Alerts } from './pages/Alerts'
+import { ReviewQueue } from './pages/ReviewQueue'
 import { Login } from './pages/Login'
 import { OnboardingPage } from './pages/onboarding/OnboardingPage'
 import { ProjectOverview } from './pages/ProjectOverview'
@@ -36,6 +38,8 @@ export function App() {
         <Route path="/experiments/:experimentId/ai-quality" element={<AIQuality />} />
         <Route path="/sessions" element={<Sessions />} />
         <Route path="/sessions/:sessionId" element={<SessionDetail />} />
+        <Route path="/alerts" element={<Alerts />} />
+        <Route path="/review-queue" element={<ReviewQueue />} />
         <Route path="/setup" element={<OnboardingPage />} />
         <Route path="/project" element={<ProjectOverview />} />
         <Route path="*" element={<Navigate to="/" replace />} />

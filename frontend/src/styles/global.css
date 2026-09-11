@@ -359,6 +359,13 @@ table.data-table tr.clickable:hover {
   background: var(--color-neutral-weak);
 }
 
+/* Stage 18 task 2: the review queue's high-impact rows (connected to a
+   significant Investigation finding) -- a subtle tint, never color alone
+   (the row also carries its own "high impact" chip). */
+table.data-table tr.row-highlight {
+  background: var(--color-accent-weak);
+}
+
 .table-scroll {
   overflow-x: auto;
 }

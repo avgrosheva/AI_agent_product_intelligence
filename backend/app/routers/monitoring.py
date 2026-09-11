@@ -18,6 +18,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from backend.app.auth_deps import CurrentUser, get_current_user
 from backend.app.domain_registry import available_domains, get_adapter, get_engine
+from backend.audit.service import record_audit_event
 from backend.auth.models import ROLE_RANK
 from backend.auth.service import get_membership, get_project
 from backend.app.schemas.monitoring import (
@@ -72,6 +73,12 @@ def create_config(
     result = create_monitoring_config(
         engine, project_id, request.domain, request.experiment_id, request.primary_metric,
         request.cadence_seconds, window_hours=request.window_hours, enabled=request.enabled,
+    )
+    project = get_project(engine, project_id)
+    record_audit_event(
+        engine, action="monitoring_config.create", actor_user_id=user.user_id, actor_email=user.email,
+        org_id=project.org_id if project else None, project_id=project_id, target=result.config_id,
+        metadata={"experiment_id": request.experiment_id, "cadence_seconds": request.cadence_seconds, "enabled": request.enabled},
     )
     return MonitoringConfigSchema(**result.__dict__)
 

@@ -14,6 +14,7 @@ import backend.monitoring.models  # noqa: F401 -- registers monitoring_configs/m
 import backend.quality.models  # noqa: F401 -- registers connector_runs onto Base.metadata for autogenerate
 import backend.project_config.models  # noqa: F401 -- registers project_configs onto Base.metadata for autogenerate
 import backend.notifications.models  # noqa: F401 -- registers notification_channels/notification_deliveries onto Base.metadata for autogenerate
+import backend.audit.models  # noqa: F401 -- registers audit_log_entries onto Base.metadata for autogenerate
 
 config = context.config
 

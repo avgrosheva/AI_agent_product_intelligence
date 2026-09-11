@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useActiveExperiment } from '../../state/ActiveExperimentContext'
 import { useActiveProject } from '../../state/ActiveProjectContext'
+import { useAuth } from '../../state/AuthContext'
 
 const STATUS_LABEL: Record<string, string> = {
   ambiguous_investigate: 'Needs investigation',
@@ -91,6 +92,7 @@ function NoProjectPrompt() {
 export function AppLayout() {
   const { activeProject, projects, isLoading: projectsLoading, needsExplicitSelection } = useActiveProject()
   const { activeExperimentId, activeExperiment } = useActiveExperiment()
+  const { logout } = useAuth()
   const location = useLocation()
 
   const onProjectManagementRoute = PROJECT_MANAGEMENT_PATHS.some((p) => location.pathname.startsWith(p))
@@ -141,6 +143,12 @@ export function AppLayout() {
           <NavLink to="/sessions" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
             Sessions
           </NavLink>
+          <NavLink to="/alerts" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
+            Alerts
+          </NavLink>
+          <NavLink to="/review-queue" className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
+            Review Queue
+          </NavLink>
           {expPath ? (
             <NavLink to={`${expPath}/ai-quality`} className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}>
               AI Quality
@@ -175,6 +183,9 @@ export function AppLayout() {
               {STATUS_LABEL[activeExperiment.status_chip]}
             </span>
           )}
+          <button type="button" className="btn btn-small" onClick={logout}>
+            Log out
+          </button>
         </header>
         <main className="page-outlet" style={{ flex: 1 }}>
           {showNoProjectPrompt ? <NoProjectPrompt /> : showPicker ? <ProjectPickerPrompt /> : <Outlet />}

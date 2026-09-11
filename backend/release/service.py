@@ -21,7 +21,13 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session as OrmSession
 
-from backend.analytics.cache_utils import investigation_cache, investigation_config_fingerprint, metric_defs_fingerprint, metrics_table_cache
+from backend.analytics.cache_utils import (
+    data_version_registry,
+    investigation_cache,
+    investigation_config_fingerprint,
+    metric_defs_fingerprint,
+    metrics_table_cache,
+)
 from backend.analytics.experiment_results import analyze_all_metrics
 from backend.core.adapter import DomainAdapter
 from backend.core.analysis_window import AnalysisWindow
@@ -179,13 +185,20 @@ def evaluate_release(
     failure_attributions_wide_df = adapter.failure_attributions_wide_df()
     window_key = (window.start, window.end) if window is not None else None
 
+    # Stage 18 task 6: the version-counter slot must be appended in the
+    # exact same tuple position backend.app.routers.domains's equivalent
+    # keys use, or an unwindowed call from either path builds a
+    # structurally different tuple and the two stop sharing cache entries
+    # (see the matching comment there for why len(base_df) alone isn't a
+    # sufficient staleness signal).
+    data_version = data_version_registry.current(project_id)
     result = investigation_cache.get_or_compute(
         (domain, project_id, experiment_id, primary_metric_name, investigation_config_fingerprint(config), window_key,
-         len(base_df), len(agent_actions_df), len(failure_attributions_wide_df)),
+         len(base_df), len(agent_actions_df), len(failure_attributions_wide_df), data_version),
         lambda: run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, config, primary_metric_name=primary_metric_name),
     )
     all_metric_results = metrics_table_cache.get_or_compute(
-        (domain, project_id, experiment_id, metric_defs_fingerprint(config.metric_registry), window_key, len(base_df)),
+        (domain, project_id, experiment_id, metric_defs_fingerprint(config.metric_registry), window_key, len(base_df), data_version),
         lambda: analyze_all_metrics(base_df, config.metric_registry, metric_value_columns=config.metric_value_columns),
     )
     fields = _investigation_to_release_fields(result, all_metric_results)

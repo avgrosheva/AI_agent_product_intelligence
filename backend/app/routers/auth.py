@@ -9,15 +9,19 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from backend.app.auth_deps import CurrentUser, get_current_user
 from backend.app.domain_registry import available_domains, get_engine
+from backend.audit.service import record_audit_event
 from backend.app.schemas.auth import (
     AddMemberRequest,
     CreateOrganizationRequest,
     CreateProjectRequest,
     LoginRequest,
+    LogoutAllResponse,
+    LogoutRequest,
     MeResponse,
     MembershipSchema,
     OrganizationSchema,
     ProjectSchema,
+    RefreshRequest,
     RegisterRequest,
     TokenResponse,
     UserSchema,
@@ -26,6 +30,7 @@ from backend.auth.models import ROLE_RANK
 from backend.auth.service import (
     EmailAlreadyRegistered,
     InvalidCredentials,
+    InvalidRefreshToken,
     add_member,
     authenticate_user,
     create_organization,
@@ -36,6 +41,9 @@ from backend.auth.service import (
     list_org_projects,
     list_user_memberships,
     register_user,
+    revoke_all_refresh_tokens,
+    revoke_refresh_token,
+    rotate_refresh_token,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
@@ -53,10 +61,42 @@ def register(body: RegisterRequest) -> UserSchema:
 @router.post("/auth/login", response_model=TokenResponse)
 def login(body: LoginRequest) -> TokenResponse:
     try:
-        token = authenticate_user(get_engine(), body.email, body.password)
+        pair = authenticate_user(get_engine(), body.email, body.password)
     except InvalidCredentials:
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    return TokenResponse(access_token=token)
+    return TokenResponse(access_token=pair.access_token, refresh_token=pair.refresh_token)
+
+
+@router.post("/auth/refresh", response_model=TokenResponse)
+def refresh(body: RefreshRequest) -> TokenResponse:
+    """Stage 18 task 4: exchanges one refresh token for a fresh
+    (access_token, refresh_token) pair, rotating the old one out —
+    presenting the SAME refresh token twice (it was already consumed) is
+    indistinguishable from presenting an unknown one, both 401."""
+    try:
+        pair = rotate_refresh_token(get_engine(), body.refresh_token)
+    except InvalidRefreshToken:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    return TokenResponse(access_token=pair.access_token, refresh_token=pair.refresh_token)
+
+
+@router.post("/auth/logout", status_code=204)
+def logout(body: LogoutRequest) -> None:
+    """Ends ONE session: revokes exactly the refresh token presented.
+    Never errors on an already-invalid token — logging out twice, or
+    logging out a session that already expired, is a no-op success, not
+    a failure the caller needs to handle specially."""
+    revoke_refresh_token(get_engine(), body.refresh_token)
+
+
+@router.post("/auth/logout-all", response_model=LogoutAllResponse)
+def logout_all(user: CurrentUser = Depends(get_current_user)) -> LogoutAllResponse:
+    """"Log out everywhere": revokes every still-valid refresh token
+    belonging to the CALLER (identified by their own access token, not a
+    target — there is no separate admin-revokes-another-user's-sessions
+    endpoint yet, matching the Stage 18 brief's "minimal" scope)."""
+    count = revoke_all_refresh_tokens(get_engine(), user.user_id)
+    return LogoutAllResponse(revoked_count=count)
 
 
 @router.get("/auth/me", response_model=MeResponse)
@@ -102,7 +142,30 @@ def add_org_member(org_id: str, body: AddMemberRequest, user: CurrentUser = Depe
         result = add_member(get_engine(), org_id, body.email, body.role)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    record_audit_event(
+        get_engine(), action="org_member.add_or_update", actor_user_id=user.user_id, actor_email=user.email,
+        org_id=org_id, target=result.email, metadata={"role": result.role},
+    )
     return MembershipSchema(**result.__dict__)
+
+
+@router.post("/orgs/{org_id}/members/{target_user_id}/revoke-sessions", response_model=LogoutAllResponse)
+def revoke_member_sessions(org_id: str, target_user_id: str, user: CurrentUser = Depends(get_current_user)) -> LogoutAllResponse:
+    """Stage 18 task 4's "admin action" variant of logout-all — an org
+    admin forcing a DIFFERENT member's sessions to end (an offboarding, a
+    suspected compromised account), scoped to members of the admin's own
+    organization only."""
+    _require_org_role(org_id, user, "admin")
+    engine = get_engine()
+    target_membership = get_membership(engine, org_id, target_user_id)
+    if target_membership is None:
+        raise HTTPException(status_code=404, detail="No member with that user id in this organization")
+    count = revoke_all_refresh_tokens(engine, target_user_id)
+    record_audit_event(
+        engine, action="user_sessions.revoke_all", actor_user_id=user.user_id, actor_email=user.email,
+        org_id=org_id, target=target_membership.email, metadata={"revoked_count": count},
+    )
+    return LogoutAllResponse(revoked_count=count)
 
 
 @router.get("/orgs/{org_id}/projects", response_model=list[ProjectSchema])
@@ -120,4 +183,8 @@ def create_org_project(org_id: str, body: CreateProjectRequest, user: CurrentUse
         # adapter, invisible forever except by its raw database row.
         raise HTTPException(status_code=422, detail=f"Unknown domain '{body.domain}'. Available: {available_domains()}")
     result = create_project(get_engine(), org_id, body.name, body.domain)
+    record_audit_event(
+        get_engine(), action="project.create", actor_user_id=user.user_id, actor_email=user.email,
+        org_id=org_id, project_id=result.project_id, target=result.name, metadata={"domain": result.domain},
+    )
     return ProjectSchema(**result.__dict__)

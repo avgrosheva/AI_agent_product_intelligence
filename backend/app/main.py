@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.app.routers import ai_quality, alerts, auth, domains, experiments, ingestion, investigation, langfuse_connector, monitoring, notifications, postgres_business_connector, review, sessions
+from backend.app.routers import ai_quality, alerts, audit, auth, domains, experiments, ingestion, investigation, langfuse_connector, monitoring, notifications, ops, postgres_business_connector, review, sessions
 from backend.app.schemas.common import ErrorResponse
 from backend.app.warmup import run_startup_warmup
 from backend.monitoring.scheduler import MonitoringScheduler, scheduler_enabled_via_env
@@ -101,6 +101,8 @@ app.include_router(langfuse_connector.router)
 app.include_router(postgres_business_connector.router)
 app.include_router(monitoring.router)
 app.include_router(notifications.router)
+app.include_router(audit.router)
+app.include_router(ops.router)
 
 
 @app.get("/health", tags=["health"])

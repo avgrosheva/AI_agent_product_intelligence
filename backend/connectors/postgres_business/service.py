@@ -20,6 +20,7 @@ from backend.connectors.postgres_business.schemas import (
     PostgresEnrichmentResult,
     PostgresUnmatchedRow,
 )
+from backend.analytics.cache_utils import data_version_registry
 from backend.ingestion.service import metric_id_for, upsert_metrics
 
 
@@ -140,6 +141,10 @@ def run_enrichment(engine: Engine, client: PostgresBusinessClient, project_id: s
     rows = client.fetch_rows(request.source)
     metric_rows, _preview, unmatched, validation_errors, nulls_skipped, matched_rows, sessions_with_no_match = _build_plan(engine, project_id, request, rows)
     persisted = upsert_metrics(engine, metric_rows)
+    # Stage 18 task 6: layers business metrics onto EXISTING sessions via
+    # the same upsert-in-place path ingest_batch uses -- same cache
+    # staleness risk, same fix.
+    data_version_registry.bump(project_id)
     return PostgresEnrichmentResult(
         domain=request.domain,
         source_rows_fetched=len(rows),

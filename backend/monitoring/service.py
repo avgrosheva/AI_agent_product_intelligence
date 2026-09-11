@@ -227,6 +227,19 @@ def list_monitoring_runs(engine: Engine, project_id: str, config_id: str, limit:
         return [_run_to_result(r) for r in rows]
 
 
+def get_latest_monitoring_run_overall(engine: Engine) -> MonitoringRunResult | None:
+    """Stage 18 task 7: the operational health endpoint's "latest
+    monitoring success/failure" -- deliberately NOT project-scoped (an
+    ops signal about the scheduler's own health across the whole
+    deployment, not a tenant-facing read), and nothing here is
+    project/experiment-content-sensitive (status, timestamps, a
+    failure_reason string) in a way the health endpoint's stated "no
+    secrets" constraint would forbid."""
+    with OrmSession(engine) as session:
+        row = session.query(MonitoringRun).order_by(MonitoringRun.started_at.desc()).first()
+        return _run_to_result(row) if row else None
+
+
 def get_latest_monitoring_run(engine: Engine, project_id: str, config_id: str) -> MonitoringRunResult | None:
     with OrmSession(engine) as session:
         row = (

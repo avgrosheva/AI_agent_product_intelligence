@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.alerts.service import AlertResult, acknowledge_alert, get_alert, list_alerts
 from backend.app.auth_deps import CurrentUser, ProjectContext, get_current_user, get_engine, get_project_context_by_id
 from backend.app.schemas.alerts import AlertListResponse, AlertSchema
+from backend.audit.service import record_audit_event
 from backend.auth.models import ROLE_RANK
 from backend.auth.service import get_membership, get_project
 
@@ -83,4 +84,9 @@ def acknowledge_alert_endpoint(alert_id: str, user: CurrentUser = Depends(get_cu
         raise HTTPException(status_code=404, detail=f"No alert with id '{alert_id}'")
     _authorize_alert(result, user, "analyst")
     updated = acknowledge_alert(get_engine(), alert_id)
+    org_id = get_project(get_engine(), result.project_id).org_id if result.project_id else None
+    record_audit_event(
+        get_engine(), action="alert.acknowledge", actor_user_id=user.user_id, actor_email=user.email,
+        org_id=org_id, project_id=result.project_id, target=alert_id, metadata={"rule": result.rule, "severity": result.severity},
+    )
     return _to_schema(updated)

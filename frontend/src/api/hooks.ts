@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiPost, apiPut, ApiError } from './client'
 import type {
+  Alert,
+  AlertListResponse,
+  AlertSeverity,
+  AlertStatus,
   ClassifierEvaluationResponse,
   DataQualityReport,
   GenericAIQualitySummaryResponse,
@@ -26,6 +30,9 @@ import type {
   ReleaseEvidenceResponse,
   ReleaseHistoryResponse,
   ReleaseSummaryResponse,
+  Review,
+  ReviewDecision,
+  ReviewQueueResponse,
   SegmentDimensionsResponse,
 } from './types'
 
@@ -348,6 +355,78 @@ export function useCreateNotificationChannel(domain: string | undefined, project
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notification-channels', domain, projectId] })
       queryClient.invalidateQueries({ queryKey: ['onboarding-status', domain, projectId] })
+    },
+  })
+}
+
+// -- Stage 18 task 1: Alerts ---------------------------------------------
+
+export interface AlertFilters {
+  domain?: string
+  experiment_id?: string
+  status?: AlertStatus
+  severity?: AlertSeverity
+  limit?: number
+  offset?: number
+}
+
+export function useAlerts(projectId: string | undefined, filters: AlertFilters) {
+  return useQuery({
+    queryKey: ['alerts', projectId, filters],
+    queryFn: () => apiGet<AlertListResponse>('/api/v1/alerts', { project_id: projectId, ...filters }),
+    enabled: !!projectId,
+    staleTime: ONBOARDING_STALE_TIME_MS,
+  })
+}
+
+export function useAcknowledgeAlert(projectId: string | undefined, filters: AlertFilters) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (alertId: string) => apiPost<Alert>(`/api/v1/alerts/${alertId}/acknowledge`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alerts', projectId, filters] })
+    },
+  })
+}
+
+// -- Stage 18 task 2: Human review queue ----------------------------------
+
+export interface ReviewQueueFilters {
+  experiment_id?: string
+  mechanism?: string
+  unreviewed_only?: boolean
+  limit?: number
+  offset?: number
+}
+
+export function useReviewQueue(domain: string | undefined, projectId: string | undefined, filters: ReviewQueueFilters) {
+  return useQuery({
+    queryKey: ['review-queue', domain, projectId, filters],
+    queryFn: () =>
+      apiGet<ReviewQueueResponse>(`/api/v1/domains/${domain}/review-queue`, {
+        project_id: projectId,
+        ...(filters as Record<string, string | number | boolean | undefined>),
+      }),
+    enabled: !!domain && !!projectId,
+    staleTime: ONBOARDING_STALE_TIME_MS,
+  })
+}
+
+export function useSubmitReview(domain: string | undefined, projectId: string | undefined, filters: ReviewQueueFilters) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sessionId, failureMode, decision, correctedMechanism, note }: {
+      sessionId: string
+      failureMode: string
+      decision: ReviewDecision
+      correctedMechanism?: string
+      note?: string
+    }) =>
+      apiPost<Review>(`/api/v1/domains/${domain}/sessions/${sessionId}/attributions/${failureMode}/review`, {
+        decision, corrected_mechanism: correctedMechanism, note,
+      }, { project_id: projectId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['review-queue', domain, projectId, filters] })
     },
   })
 }

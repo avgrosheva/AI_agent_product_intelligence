@@ -705,3 +705,69 @@ export interface GenericAIQualitySummaryResponse {
   tool_use_quality: GenericToolUseQuality
   trajectory_patterns: GenericTrajectoryPatternItem[]
 }
+
+// -- Stage 18 task 1: Alerts -------------------------------------------
+
+export type AlertRule = 'rollback' | 'blocking_guardrail_breach' | 'hold_negative_segment'
+export type AlertSeverity = 'critical' | 'warning'
+export type AlertStatus = 'open' | 'acknowledged'
+
+export interface Alert {
+  alert_id: string
+  domain: string
+  experiment_id: string
+  evaluation_id: string
+  rule: AlertRule
+  severity: AlertSeverity
+  reason: string
+  related_guardrail: string | null
+  related_finding: string | null
+  status: AlertStatus
+  created_at: string
+  acknowledged_at: string | null
+}
+
+export interface AlertListResponse {
+  alerts: Alert[]
+  total: number
+  limit: number
+  offset: number
+}
+
+// -- Stage 18 task 2: Human review queue --------------------------------
+
+export type ReviewDecision = 'confirmed' | 'rejected'
+
+export interface ReviewQueueItem {
+  session_id: string
+  experiment_id: string
+  agent_version: string
+  failure_mode: string
+  detector_source: string
+  confidence: number | null
+  evidence_text: string | null
+  reviewed: boolean
+  high_impact: boolean
+}
+
+export interface ReviewQueueResponse {
+  domain: string
+  items: ReviewQueueItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface Review {
+  review_id: string
+  domain: string
+  project_id: string | null
+  session_id: string
+  failure_mode: string
+  decision: ReviewDecision
+  corrected_mechanism: string | null
+  note: string | null
+  reviewer: string | null
+  created_at: string
+  updated_at: string
+}

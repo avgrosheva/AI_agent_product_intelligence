@@ -14,8 +14,15 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 
-from backend.auth.models import ROLE_RANK, ROLES, Organization, OrganizationMembership, Project, PlatformUser
-from backend.auth.security import create_access_token, hash_password, verify_password
+from backend.auth.models import ROLE_RANK, ROLES, Organization, OrganizationMembership, Project, PlatformUser, RefreshToken
+from backend.auth.security import (
+    REFRESH_TOKEN_TTL,
+    create_access_token,
+    generate_refresh_token,
+    hash_password,
+    hash_refresh_token,
+    verify_password,
+)
 
 
 class AuthError(Exception):
@@ -32,11 +39,25 @@ class InvalidCredentials(AuthError):
     pass
 
 
+class InvalidRefreshToken(AuthError):
+    """Unknown, expired, or already-revoked/rotated refresh token — the
+    router maps this to a 401 exactly like InvalidCredentials, never
+    distinguishing "expired" from "revoked" from "never existed" in the
+    response (that distinction is only useful to an attacker probing for
+    which tokens are real)."""
+
+
 @dataclass(frozen=True)
 class UserResult:
     user_id: str
     email: str
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class TokenPair:
+    access_token: str
+    refresh_token: str
 
 
 @dataclass(frozen=True)
@@ -83,13 +104,85 @@ def register_user(engine: Engine, email: str, password: str) -> UserResult:
         return UserResult(user_id=str(row.user_id), email=row.email, created_at=row.created_at)
 
 
-def authenticate_user(engine: Engine, email: str, password: str) -> str:
-    """Returns a signed access token, or raises InvalidCredentials."""
+def authenticate_user(engine: Engine, email: str, password: str) -> TokenPair:
+    """Returns a fresh (access_token, refresh_token) pair, or raises
+    InvalidCredentials."""
     with OrmSession(engine) as session:
         row = session.execute(select(PlatformUser).where(PlatformUser.email == email.lower().strip())).scalar_one_or_none()
     if row is None or not verify_password(password, row.password_hash):
         raise InvalidCredentials("invalid email or password")
-    return create_access_token(str(row.user_id))
+    user_id = str(row.user_id)
+    return TokenPair(access_token=create_access_token(user_id), refresh_token=_issue_refresh_token(engine, user_id))
+
+
+def _issue_refresh_token(engine: Engine, user_id: str) -> str:
+    plaintext = generate_refresh_token()
+    now = _now()
+    with OrmSession(engine) as session:
+        session.add(RefreshToken(
+            token_id=uuid.uuid4(), user_id=uuid.UUID(user_id), token_hash=hash_refresh_token(plaintext),
+            created_at=now, expires_at=now + REFRESH_TOKEN_TTL, revoked_at=None, replaced_by=None,
+        ))
+        session.commit()
+    return plaintext
+
+
+def rotate_refresh_token(engine: Engine, plaintext_token: str) -> TokenPair:
+    """Exchanges one valid, not-yet-used refresh token for a new
+    (access_token, refresh_token) pair, and immediately revokes the old
+    one — a refresh token is single-use; presenting it again after it's
+    been rotated is treated exactly like presenting an unknown token
+    (InvalidRefreshToken), the standard signal that a token may have been
+    stolen and is being replayed by two different parties."""
+    token_hash = hash_refresh_token(plaintext_token)
+    now = _now()
+    with OrmSession(engine) as session:
+        row = session.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).scalar_one_or_none()
+        if row is None or row.revoked_at is not None or row.expires_at <= now:
+            raise InvalidRefreshToken("refresh token is invalid, expired, or already used")
+        user_id = str(row.user_id)
+        new_plaintext = generate_refresh_token()
+        new_token_id = uuid.uuid4()
+        row.revoked_at = now
+        row.replaced_by = new_token_id
+        session.add(RefreshToken(
+            token_id=new_token_id, user_id=row.user_id, token_hash=hash_refresh_token(new_plaintext),
+            created_at=now, expires_at=now + REFRESH_TOKEN_TTL, revoked_at=None, replaced_by=None,
+        ))
+        session.commit()
+    return TokenPair(access_token=create_access_token(user_id), refresh_token=new_plaintext)
+
+
+def revoke_refresh_token(engine: Engine, plaintext_token: str) -> bool:
+    """Logout (single session): revokes exactly the one presented token.
+    Returns False for an unknown/already-revoked/expired token (the
+    router treats that as a no-op success — logging out of a session
+    that's already gone is not an error) rather than raising."""
+    token_hash = hash_refresh_token(plaintext_token)
+    now = _now()
+    with OrmSession(engine) as session:
+        row = session.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).scalar_one_or_none()
+        if row is None or row.revoked_at is not None:
+            return False
+        row.revoked_at = now
+        session.commit()
+    return True
+
+
+def revoke_all_refresh_tokens(engine: Engine, user_id: str) -> int:
+    """"Log out everywhere" / an admin forcing a user's sessions to end —
+    revokes every still-valid refresh token for this user and returns how
+    many. Already-expired or already-revoked rows are left untouched
+    (nothing to revoke), not counted."""
+    now = _now()
+    with OrmSession(engine) as session:
+        rows = session.execute(
+            select(RefreshToken).where(RefreshToken.user_id == uuid.UUID(user_id), RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now)
+        ).scalars().all()
+        for row in rows:
+            row.revoked_at = now
+        session.commit()
+        return len(rows)
 
 
 def get_user(engine: Engine, user_id: str) -> UserResult | None:

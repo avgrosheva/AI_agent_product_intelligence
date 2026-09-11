@@ -235,7 +235,20 @@ export function Sessions() {
                 </thead>
                 <tbody>
                   {data.items.map((s) => (
-                    <tr key={s.session_id} className="clickable" onClick={() => navigate(`/sessions/${s.session_id}`)}>
+                    <tr
+                      key={s.session_id}
+                      className="clickable"
+                      onClick={() => navigate(`/sessions/${s.session_id}`)}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open session ${s.session_id.slice(0, 8)}`}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          navigate(`/sessions/${s.session_id}`)
+                        }
+                      }}
+                    >
                       <td className="mono">{s.session_id.slice(0, 8)}…</td>
                       <td>{s.agent_version}</td>
                       <td>{s.outcome ? <span className={`chip ${OUTCOME_CHIP[s.outcome] ?? 'chip-neutral'}`}>{s.outcome.replace(/_/g, ' ')}</span> : '—'}</td>

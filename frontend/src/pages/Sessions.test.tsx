@@ -70,4 +70,11 @@ describe('Sessions page', () => {
     renderWithProviders(<Sessions />, { route: '/sessions' })
     await waitFor(() => expect(screen.getByText(/Internal Server Error/)).toBeInTheDocument(), LONG_TIMEOUT)
   })
+
+  it('a session row is keyboard-focusable and reachable without a pointer (Stage 18 task 8)', async () => {
+    renderWithProviders(<Sessions />, { route: `/sessions?experiment_id=${EXPERIMENT_ID}` })
+    await waitFor(() => expect(screen.getByText(/1 sessions match/)).toBeInTheDocument(), LONG_TIMEOUT)
+    const row = screen.getByRole('button', { name: /Open session/ })
+    expect(row).toHaveAttribute('tabIndex', '0')
+  })
 })

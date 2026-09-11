@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.app.auth_deps import ProjectContext, get_project_context, require_role
 from backend.app.domain_registry import get_adapter, get_engine
+from backend.audit.service import record_audit_event
 from backend.app.schemas.review import (
     ReviewQueueItemSchema,
     ReviewQueueResponse,
@@ -48,6 +49,11 @@ def submit_attribution_review(
         )
     except ReviewValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    record_audit_event(
+        get_engine(), action="attribution_review.submit", actor_user_id=ctx.user.user_id, actor_email=ctx.user.email,
+        org_id=ctx.project.org_id, project_id=ctx.project.project_id, target=f"{session_id}:{failure_mode}",
+        metadata={"domain": domain, "decision": body.decision, "has_corrected_mechanism": body.corrected_mechanism is not None},
+    )
     return _review_to_schema(result)
 
 

@@ -56,3 +56,31 @@ class MonitoringRun(Base):
     window_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     release_evaluation_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SchedulerLease(Base):
+    # Stage 18 task 5: which backend instance is currently the one
+    # actually POLLING for due monitoring jobs, so running the scheduler
+    # thread (backend.monitoring.scheduler.MonitoringScheduler) on several
+    # backend instances at once doesn't have all of them redundantly
+    # re-scanning every config every poll interval. One row per logical
+    # scheduler (lease_key -- "monitoring_scheduler" today; the shape
+    # supports more than one if a second periodic job ever needs its own
+    # lease); whichever instance holds a still-unexpired lease is the sole
+    # poller until it either renews or its lease lapses, at which point any
+    # instance may claim it next (see backend.monitoring.lease
+    # .try_acquire_or_renew_lease for the atomic acquire/renew). This is a
+    # SECOND, independent layer of protection on top of
+    # backend.monitoring.service.run_monitoring_job's existing Postgres
+    # advisory lock (keyed per project+experiment) -- that lock is the hard
+    # guarantee no due job ever actually executes twice even if lease logic
+    # has a bug; this lease exists to stop every instance from doing the
+    # (harmless but wasteful) due-job scan every 30s, and to make "which
+    # instance is leading" observable (backend.app.routers.ops's health
+    # endpoint reads it).
+    __tablename__ = "scheduler_leases"
+
+    lease_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    holder_id: Mapped[str] = mapped_column(Text, nullable=False)
+    acquired_at: Mapped[datetime] = mapped_column(nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)

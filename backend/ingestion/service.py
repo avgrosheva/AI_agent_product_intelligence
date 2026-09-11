@@ -32,6 +32,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session as OrmSession
 
+from backend.analytics.cache_utils import data_version_registry
 from backend.ingestion.models import (
     IngestedAction,
     IngestedExperiment,
@@ -289,6 +290,14 @@ def ingest_batch(engine: Engine, request: IngestBatchRequest, project_id: str | 
         upsert_metrics(engine, metric_rows, db=db)
 
         db.commit()
+
+    # Stage 18 task 6: an upsert here can update an EXISTING session's
+    # content (same external_session_id re-sent with a corrected outcome,
+    # or a metric value revised) without changing any table's row count --
+    # invalidate this project's cached metrics/investigation results
+    # deterministically rather than leaving them to a len(base_df) check
+    # that would miss exactly this case.
+    data_version_registry.bump(project_id)
 
     return IngestionResponse(
         domain=domain,

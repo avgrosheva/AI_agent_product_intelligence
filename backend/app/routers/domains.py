@@ -25,12 +25,19 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from backend.analytics.cache_utils import investigation_cache, investigation_config_fingerprint, metric_defs_fingerprint, metrics_table_cache
+from backend.analytics.cache_utils import (
+    data_version_registry,
+    investigation_cache,
+    investigation_config_fingerprint,
+    metric_defs_fingerprint,
+    metrics_table_cache,
+)
 from backend.analytics.experiment_results import analyze_all_metrics, analyze_metric
 from backend.app.auth_deps import CurrentUser, ProjectContext, get_current_user, get_project_context, require_role
 from backend.app.domain_registry import available_domains, get_adapter, get_engine
 from backend.app.routers.experiments import _status_chip
 from backend.app.investigation_serialization import finding_to_schema
+from backend.audit.service import record_audit_event
 from backend.app.schemas.common import metric_result_to_schema
 from backend.app.schemas.domain_generic import (
     GenericAIQualitySummaryResponse,
@@ -124,15 +131,17 @@ def _validate_primary_metric(adapter: DomainAdapter, primary_metric: str) -> Non
 # metric) so a project that edits its own metrics config
 # (backend.project_config) invalidates itself the moment that config
 # actually changes, without this module needing to know when that
-# happened. ALSO keyed on len(base_df): unlike commerce (static dataset,
-# safe to cache indefinitely -- see
+# happened. ALSO keyed on len(base_df) AND
+# data_version_registry.current(project_id) (Stage 18 task 6): unlike
+# commerce (static dataset, safe to cache indefinitely -- see
 # CommerceAdapter._cached_session_level_base), the support domain's
-# ingested_* tables are genuinely live, so a metric-defs fingerprint alone
-# would silently serve a stale metrics table forever once new sessions
-# land after the first call for a given experiment. Row count is a cheap,
-# good-enough staleness signal for an append-only ingestion table -- it
-# does not catch an in-place mutation of existing rows, but nothing
-# ingests that way today.
+# ingested_* tables are genuinely live. Row count alone catches new rows
+# arriving but misses an in-place UPDATE of an existing row's content
+# (backend.ingestion.service.ingest_batch's upsert, or
+# backend.connectors.postgres_business.service.run_enrichment layering
+# business metrics onto existing sessions, can both do exactly that) --
+# the version counter, bumped explicitly at the end of both write paths,
+# is the deterministic signal that actually covers that case.
 def _cached_analyze_all_metrics(domain: str, project_id: str, experiment_id: str, base_df, metric_defs, metric_value_columns):
     # window_key is always None here (this endpoint never applies a
     # window) -- kept as an explicit slot, in the same position
@@ -140,7 +149,10 @@ def _cached_analyze_all_metrics(domain: str, project_id: str, experiment_id: str
     # either path produces the identical key and actually shares the
     # cache entry, instead of two structurally different tuples that
     # happen to mean the same thing.
-    key = (domain, project_id, experiment_id, metric_defs_fingerprint(metric_defs), None, len(base_df))
+    key = (
+        domain, project_id, experiment_id, metric_defs_fingerprint(metric_defs), None,
+        len(base_df), data_version_registry.current(project_id),
+    )
     return metrics_table_cache.get_or_compute(key, lambda: analyze_all_metrics(base_df, metric_defs, metric_value_columns=metric_value_columns))
 
 
@@ -161,14 +173,16 @@ def _cached_analyze_all_metrics(domain: str, project_id: str, experiment_id: str
 # backend.analytics.cache_utils.investigation_cache -- shared with
 # evaluate_release the same way the metrics cache above is, same key
 # shape (domain/project/experiment/primary_metric, fingerprinted config,
-# row counts as a live-data staleness signal). A cache hit returns an
-# identical result object.
+# row counts AND the explicit data-version counter as staleness signals
+# -- see the matching comment on _cached_analyze_all_metrics for why row
+# counts alone aren't enough). A cache hit returns an identical result
+# object.
 def _cached_run_investigation(domain, project_id, experiment_id, primary_metric, base_df, agent_actions_df, failure_attributions_wide_df, config):
     # window_key is always None here (this endpoint never applies a
     # window) -- see the matching comment in _cached_analyze_all_metrics.
     key = (
         domain, project_id, experiment_id, primary_metric, investigation_config_fingerprint(config), None,
-        len(base_df), len(agent_actions_df), len(failure_attributions_wide_df),
+        len(base_df), len(agent_actions_df), len(failure_attributions_wide_df), data_version_registry.current(project_id),
     )
     return investigation_cache.get_or_compute(
         key, lambda: run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, config, primary_metric_name=primary_metric)
@@ -599,6 +613,11 @@ def create_release_evaluation(
     _validate_primary_metric(adapter, primary_metric)
 
     result = evaluate_and_persist_release(get_engine(), domain, experiment_id, adapter, primary_metric, project_id=ctx.project.project_id)
+    record_audit_event(
+        get_engine(), action="release_evaluation.trigger", actor_user_id=ctx.user.user_id, actor_email=ctx.user.email,
+        org_id=ctx.project.org_id, project_id=ctx.project.project_id, target=experiment_id,
+        metadata={"domain": domain, "primary_metric": primary_metric, "status": result.status},
+    )
     return ReleaseEvaluationSchema(**result.__dict__)
 
 
@@ -790,6 +809,23 @@ def put_config(domain: str, request: ProjectConfigRequest, ctx: ProjectContext =
         engine, ctx.project.project_id, primary_metric=request.primary_metric, metrics_json=request.metrics,
         guardrails_json=request.guardrails, segment_dimensions_json=request.segment_dimensions, economics_json=request.economics,
         monitoring_cadence_seconds=request.monitoring_cadence_seconds, enabled_notification_rules=request.enabled_notification_rules,
+    )
+    # Stage 18 task 3: record WHICH top-level sections were touched, never
+    # the sections' own content — a metrics/guardrails/economics config
+    # isn't secret, but keeping this to field names (not values) means a
+    # future field added to any of them is safe here by default rather
+    # than needing this call site remembered and updated.
+    changed_fields = [
+        f for f, v in [
+            ("primary_metric", request.primary_metric), ("metrics", request.metrics), ("guardrails", request.guardrails),
+            ("segment_dimensions", request.segment_dimensions), ("economics", request.economics),
+            ("monitoring_cadence_seconds", request.monitoring_cadence_seconds),
+            ("enabled_notification_rules", request.enabled_notification_rules),
+        ] if v is not None
+    ]
+    record_audit_event(
+        engine, action="project_config.update", actor_user_id=ctx.user.user_id, actor_email=ctx.user.email,
+        org_id=ctx.project.org_id, project_id=ctx.project.project_id, target=domain, metadata={"changed_fields": changed_fields},
     )
     return _config_schema(ctx.project.project_id, result, adapter, engine, domain)
 
