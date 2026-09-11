@@ -53,10 +53,16 @@ class MetricDefinition:
     # a binary event (constraint_satisfaction_rate).
     is_rate_metric: bool = False
     # Stage 4 (configurable metrics): optional display/config metadata.
-    # Defaults keep every metric literal declared before Stage 4 (all of
-    # commerce's, below) valid unchanged; a domain's config-file-loaded
-    # metrics (backend.core.config.load_metric_config) populate these
-    # explicitly instead.
+    # Defaults keep any metric literal that omits these valid unchanged
+    # (nothing in the analytics/decision engine reads them); a domain's
+    # config-file-loaded metrics (backend.core.config.load_metric_config)
+    # populate these explicitly. Commerce's own literals below set
+    # metric_type/direction explicitly wherever the default ("rate" /
+    # "higher_is_better") would be objectively wrong for a presentation
+    # surface like the Stage 15 onboarding UI (e.g. abandonment_rate is
+    # lower_is_better, cost/latency metrics aren't a "rate") — left
+    # unset only where the correct value is itself ambiguous (e.g.
+    # turns_per_session, clarification_rate).
     label: str = ""                        # human-readable display name; "" means "use name"
     metric_type: str = "rate"              # "rate" | "continuous" | "ratio" — presentation hint only
     direction: str = "higher_is_better"    # "higher_is_better" | "lower_is_better"
@@ -111,6 +117,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         cluster_stat_shape="symmetric",
         implemented=True,
         is_rate_metric=True,
+        direction="lower_is_better",
         ),
     MetricDefinition(
         name="impression_to_click_rate",
@@ -173,6 +180,8 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=True,
         cluster_stat_shape="symmetric",
         implemented=True,
+        metric_type="continuous",
+        direction="lower_is_better",
     ),
     MetricDefinition(
         name="time_to_goal_seconds",
@@ -187,6 +196,8 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=True,
         cluster_stat_shape="skewed",
         implemented=True,
+        metric_type="continuous_skewed",
+        direction="lower_is_better",
     ),
     MetricDefinition(
         name="turns_per_session",
@@ -201,6 +212,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=True,
         cluster_stat_shape="symmetric",
         implemented=True,
+        metric_type="continuous",
     ),
     MetricDefinition(
         name="click_through_rate_on_recommendations",
@@ -231,6 +243,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=False,
         cluster_stat_shape=None,
         implemented=True,
+        metric_type="continuous",
         notes="Already a user-level quantity by construction; not tested for significance in Stage 2 (not part of the rollout decision).",
     ),
     MetricDefinition(
@@ -263,6 +276,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         implemented=True,
         notes="The diagnostic wired to planted effect overclarify_v2 (DATA_MODEL.md SS6).",
         is_rate_metric=True,
+        direction="lower_is_better",
         ),
     MetricDefinition(
         name="tool_calls_per_session",
@@ -277,6 +291,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=True,
         cluster_stat_shape="symmetric",
         implemented=True,
+        metric_type="continuous",
     ),
     MetricDefinition(
         name="tool_success_rate",
@@ -322,6 +337,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         cluster_stat_shape="symmetric",
         implemented=True,
         is_rate_metric=True,
+        direction="lower_is_better",
         ),
     MetricDefinition(
         name="action_sequence_length",
@@ -336,6 +352,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=True,
         cluster_stat_shape="symmetric",
         implemented=True,
+        metric_type="continuous",
     ),
     MetricDefinition(
         name="offline_task_success_rate",
@@ -395,6 +412,8 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=False,
         cluster_stat_shape=None,
         implemented=True,
+        metric_type="continuous",
+        direction="lower_is_better",
         notes="Guardrail (METRICS.md SS5). METRICS.md defines this guardrail as a deterministic ratio-threshold check (flag if v2 p95 > v1 p95 x 1.15), not a hypothesis test — a percentile has no standard per-user cluster reduction the way a mean does, so Stage 2 reports it descriptively with the threshold check rather than a p-value/CI.",
     ),
     MetricDefinition(
@@ -412,6 +431,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         implemented=True,
         notes="Guardrail.",
         is_rate_metric=True,
+        direction="lower_is_better",
         ),
     MetricDefinition(
         name="unsupported_product_claim_rate",
@@ -441,6 +461,8 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=True,
         cluster_stat_shape="skewed",
         implemented=True,
+        metric_type="continuous_skewed",
+        direction="lower_is_better",
         notes="Also the economic guardrail (METRICS.md SS5/SS6 — one definition, referenced from both).",
     ),
     MetricDefinition(
@@ -456,6 +478,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=True,
         cluster_stat_shape="skewed",
         implemented=True,
+        metric_type="continuous_skewed",
         notes="Reported in USD-equivalent using a fixed illustrative RUB/USD rate for a single unified currency in the metric table; raw RUB values remain in product_events/products.",
     ),
     MetricDefinition(
@@ -471,6 +494,8 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=False,
         cluster_stat_shape=None,
         implemented=True,
+        metric_type="continuous",
+        direction="lower_is_better",
         notes="A ratio-of-sums (Kish-style) metric, not a per-session average — reported descriptively per arm with a bootstrap CI on the ratio itself rather than a cluster mean-difference test (see experiment_results.py).",
     ),
     MetricDefinition(
@@ -486,6 +511,7 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=True,
         cluster_stat_shape="skewed",
         implemented=True,
+        metric_type="continuous_skewed",
     ),
     MetricDefinition(
         name="cost_to_serve_ratio",
@@ -500,6 +526,8 @@ METRIC_REGISTRY: list[MetricDefinition] = [
         is_inferential=False,
         cluster_stat_shape=None,
         implemented=True,
+        metric_type="continuous",
+        direction="lower_is_better",
     ),
     # --- pre-treatment dimensions (eligible for Stage 3 segment discovery) ---
     MetricDefinition(

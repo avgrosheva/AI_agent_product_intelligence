@@ -147,6 +147,24 @@ def get_reviews_for_session(engine: Engine, domain: str, session_id: str, projec
     return {r.failure_mode: _row_to_result(r) for r in rows}
 
 
+def list_reviews_for_sessions(engine: Engine, domain: str, session_ids: set[str], project_id: str | None = None) -> dict[str, dict[str, ReviewResult]]:
+    """session_id -> {failure_mode: its review}, over the given
+    session_ids -- the bulk counterpart to get_reviews_for_session, used
+    by the generic sessions list (Stage 17 task 3) to filter/annotate a
+    page of sessions by review status without one query per row."""
+    if not session_ids:
+        return {}
+    with OrmSession(engine) as session:
+        stmt = select(AttributionReview).where(AttributionReview.domain == domain, AttributionReview.session_id.in_(session_ids))
+        if project_id is not None:
+            stmt = stmt.where(AttributionReview.project_id == project_id)
+        rows = session.execute(stmt).scalars().all()
+    result: dict[str, dict[str, ReviewResult]] = {}
+    for r in rows:
+        result.setdefault(r.session_id, {})[r.failure_mode] = _row_to_result(r)
+    return result
+
+
 def count_reviews_by_mechanism(engine: Engine, domain: str, session_ids: set[str], project_id: str | None = None) -> dict[str, dict[str, int]]:
     """failure_mode -> {"reviewed": n, "confirmed": n, "rejected": n}, over
     just the given session_ids (a caller scopes this to one experiment's

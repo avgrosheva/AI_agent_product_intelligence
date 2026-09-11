@@ -33,7 +33,9 @@ def test_no_notification_when_event_type_not_enabled(test_identity):
 
     results = dispatch_event(engine, project_id, "ROLLBACK", "eval-1", {"status": "ROLLBACK"}, post_fn=lambda u, p, t: 200)
     assert results == []
-    assert list_deliveries(engine, project_id) == []
+    deliveries, total = list_deliveries(engine, project_id)
+    assert deliveries == []
+    assert total == 0
 
 
 def test_no_notification_when_project_has_no_config_at_all(test_identity):
@@ -104,7 +106,8 @@ def test_secret_url_never_appears_in_delivery_log_or_channel_listing(test_identi
 
     dispatch_event(engine, project_id, "ROLLBACK", f"eval-{uuid.uuid4().hex[:8]}", {}, post_fn=raising_post, sleep_fn=lambda s: None)
 
-    for delivery in list_deliveries(engine, project_id):
+    deliveries, _ = list_deliveries(engine, project_id)
+    for delivery in deliveries:
         assert SECRET_URL not in delivery.payload_summary
         assert SECRET_URL not in (delivery.last_error or "")
 
@@ -131,12 +134,12 @@ def test_notification_deduplication_same_event_delivered_once(test_identity):
 
     assert calls["n"] == 1  # the second call never even attempts delivery
     assert first[0].notification_id == second[0].notification_id
-    assert len(list_deliveries(engine, project_id)) == 1
+    assert list_deliveries(engine, project_id)[1] == 1  # total
 
     # A genuinely different event (different dedup_key) DOES notify again.
     dispatch_event(engine, project_id, "ROLLBACK", f"eval-{uuid.uuid4().hex[:8]}", {"status": "ROLLBACK"}, post_fn=counting_post)
     assert calls["n"] == 2
-    assert len(list_deliveries(engine, project_id)) == 2
+    assert list_deliveries(engine, project_id)[1] == 2  # total
 
 
 def test_notifications_are_project_scoped(test_identity):
@@ -151,10 +154,10 @@ def test_notifications_are_project_scoped(test_identity):
     dispatch_event(engine, project_a, "ROLLBACK", "shared-dedup-key", {}, post_fn=lambda u, p, t: 200)
     dispatch_event(engine, project_b, "ROLLBACK", "shared-dedup-key", {}, post_fn=lambda u, p, t: 200)
 
-    deliveries_a = list_deliveries(engine, project_a)
-    deliveries_b = list_deliveries(engine, project_b)
-    assert len(deliveries_a) == 1
-    assert len(deliveries_b) == 1
+    deliveries_a, total_a = list_deliveries(engine, project_a)
+    deliveries_b, total_b = list_deliveries(engine, project_b)
+    assert len(deliveries_a) == 1 and total_a == 1
+    assert len(deliveries_b) == 1 and total_b == 1
     assert deliveries_a[0].notification_id != deliveries_b[0].notification_id  # same dedup_key, different projects -- never merged
 
     assert all(c.project_id == project_a for c in list_channels(engine, project_a))

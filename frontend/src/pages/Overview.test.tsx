@@ -10,13 +10,13 @@ vi.mock('../api/client', async () => {
 })
 
 describe('Overview', () => {
-  it('renders experiment name, status, north star, and regression signal from the backend', async () => {
+  it('renders experiment name, status, and north-star metric from the backend', async () => {
     renderWithProviders(<Overview />)
 
     await waitFor(() => expect(screen.getByText('Conversational Agent v2 Rollout')).toBeInTheDocument())
     expect(screen.getByText('Requires investigation')).toBeInTheDocument()
 
-    await waitFor(() => expect(screen.getByText('Abandonment rate')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Conversion rate')).toBeInTheDocument())
     expect(screen.getByText('Breach detected')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Investigate/i })).toHaveAttribute('href', expect.stringContaining('/investigation'))
   })

@@ -8,8 +8,19 @@ import { defineConfig } from '@playwright/test'
 // manage.
 export default defineConfig({
   testDir: './e2e',
-  timeout: 60_000,
+  // Stage 17 task 9: raised from 60s -- the login step alone has been
+  // observed taking up to ~45s under this environment's memory pressure
+  // (see the comment in e2e/demo-flow.spec.ts's login() helper); a
+  // multi-step test that logs in and then navigates further needs
+  // headroom beyond that single wait.
+  timeout: 120_000,
   retries: 0,
+  // Stage 17 task 9: this dev environment is memory-constrained (see
+  // README/dev notes) -- one worker avoids running several Chromium
+  // instances plus the backend plus the Vite dev server concurrently,
+  // which was observed to trigger OS-level out-of-memory kills. This
+  // does not weaken coverage (every spec still runs, just serially).
+  workers: 1,
   use: {
     baseURL: 'http://localhost:5173',
     trace: 'retain-on-failure',

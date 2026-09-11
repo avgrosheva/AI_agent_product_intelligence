@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session as OrmSession
 
@@ -95,7 +95,21 @@ def list_alerts(
     status: str | None = None,
     severity: str | None = None,
     limit: int = 50,
-) -> list[AlertResult]:
+    offset: int = 0,
+) -> tuple[list[AlertResult], int]:
+    """Stage 17 task 7: alerts accumulate one row per breach on every
+    scheduled monitoring run and every manual evaluation, indefinitely —
+    same unbounded-growth shape as release history and the review queue.
+    (page, total), newest first, so a caller can page and knows how much
+    more there is. Ordered by created_at DESC, alert_id DESC as a
+    deterministic tiebreaker: two alerts created within the same
+    timestamp resolution (a real case — a single evaluation with multiple
+    breaches, or two evaluations run back-to-back in a test or a busy
+    monitoring run, can create several alert rows in the same instant)
+    would otherwise have no defined relative order, so consecutive pages
+    at different offsets could return rows in a different order each time
+    or skip/duplicate rows across pages — a regression test caught this
+    exact case."""
     with OrmSession(engine) as session:
         stmt = select(Alert)
         if domain is not None:
@@ -108,9 +122,10 @@ def list_alerts(
             stmt = stmt.where(Alert.status == status)
         if severity is not None:
             stmt = stmt.where(Alert.severity == severity)
-        stmt = stmt.order_by(Alert.created_at.desc()).limit(limit)
+        total = session.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+        stmt = stmt.order_by(Alert.created_at.desc(), Alert.alert_id.desc()).offset(offset).limit(limit)
         rows = session.execute(stmt).scalars().all()
-    return [_row_to_result(r) for r in rows]
+    return [_row_to_result(r) for r in rows], total
 
 
 def get_alert(engine: Engine, alert_id: str, project_id: str | None = None) -> AlertResult | None:

@@ -57,12 +57,14 @@ def list_alerts_endpoint(
     status: Literal["open", "acknowledged"] | None = None,
     severity: Literal["critical", "warning"] | None = None,
     limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
     ctx: ProjectContext = Depends(get_project_context_by_id),
 ) -> AlertListResponse:
-    results = list_alerts(
-        get_engine(), domain=domain, project_id=ctx.project.project_id, experiment_id=experiment_id, status=status, severity=severity, limit=limit
+    results, total = list_alerts(
+        get_engine(), domain=domain, project_id=ctx.project.project_id, experiment_id=experiment_id, status=status, severity=severity,
+        limit=limit, offset=offset,
     )
-    return AlertListResponse(alerts=[_to_schema(r) for r in results])
+    return AlertListResponse(alerts=[_to_schema(r) for r in results], total=total, limit=limit, offset=offset)
 
 
 @router.get("/{alert_id}", response_model=AlertSchema)

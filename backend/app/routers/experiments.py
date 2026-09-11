@@ -72,10 +72,24 @@ def list_experiments(user: CurrentUser = Depends(get_current_user)) -> Experimen
     return ExperimentListResponse(experiments=summaries)
 
 
-def _status_chip(north_star: MetricResult, any_guardrail_breach: bool) -> Literal["ambiguous_investigate", "no_regression_detected", "not_yet_investigated"]:
-    north_star_down = north_star.p_value is not None and north_star.p_value < 0.05 and (north_star.cluster_mean_v2 or 0) < (north_star.cluster_mean_v1 or 0)
-    north_star_up_significant = north_star.p_value is not None and north_star.p_value < 0.05 and (north_star.cluster_mean_v2 or 0) > (north_star.cluster_mean_v1 or 0)
-    if north_star_down or (any_guardrail_breach and not north_star_up_significant):
+def _status_chip(
+    north_star: MetricResult, any_guardrail_breach: bool, direction: str = "higher_is_better"
+) -> Literal["ambiguous_investigate", "no_regression_detected", "not_yet_investigated"]:
+    """Stage 16 fix: a positive v2-vs-v1 delta is only "improvement" for a
+    higher-is-better metric -- for a lower-is-better one (e.g.
+    abandonment_rate), the SAME v2>v1 move is a regression. `direction`
+    defaults to "higher_is_better" so the one pre-Stage-16 caller
+    (list_experiments, always conversion_rate) is unchanged; the generic
+    caller (backend.app.routers.domains.list_domain_experiments) passes
+    this project's actual configured primary metric's direction. Same
+    bug class as release/summary.py's primary-metric wording fix."""
+    significant = north_star.p_value is not None and north_star.p_value < 0.05
+    v2_higher = significant and (north_star.cluster_mean_v2 or 0) > (north_star.cluster_mean_v1 or 0)
+    v2_lower = significant and (north_star.cluster_mean_v2 or 0) < (north_star.cluster_mean_v1 or 0)
+    increased_is_good = direction != "lower_is_better"
+    north_star_regressed = v2_lower if increased_is_good else v2_higher
+    north_star_improved_significantly = v2_higher if increased_is_good else v2_lower
+    if north_star_regressed or (any_guardrail_breach and not north_star_improved_significantly):
         return "ambiguous_investigate"
     return "no_regression_detected"
 

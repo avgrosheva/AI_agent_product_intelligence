@@ -9,7 +9,10 @@ import { Sessions } from './pages/Sessions'
 import { SessionDetail } from './pages/SessionDetail'
 import { AIQuality } from './pages/AIQuality'
 import { Login } from './pages/Login'
+import { OnboardingPage } from './pages/onboarding/OnboardingPage'
+import { ProjectOverview } from './pages/ProjectOverview'
 import { ActiveExperimentProvider } from './state/ActiveExperimentContext'
+import { ActiveProjectProvider } from './state/ActiveProjectContext'
 
 export function App() {
   return (
@@ -18,9 +21,11 @@ export function App() {
       <Route
         element={
           <RequireAuth>
-            <ActiveExperimentProvider>
-              <AppLayout />
-            </ActiveExperimentProvider>
+            <ActiveProjectProvider>
+              <ActiveExperimentProvider>
+                <AppLayout />
+              </ActiveExperimentProvider>
+            </ActiveProjectProvider>
           </RequireAuth>
         }
       >
@@ -31,6 +36,8 @@ export function App() {
         <Route path="/experiments/:experimentId/ai-quality" element={<AIQuality />} />
         <Route path="/sessions" element={<Sessions />} />
         <Route path="/sessions/:sessionId" element={<SessionDetail />} />
+        <Route path="/setup" element={<OnboardingPage />} />
+        <Route path="/project" element={<ProjectOverview />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

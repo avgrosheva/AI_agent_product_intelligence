@@ -48,3 +48,6 @@ class NotificationDeliverySchema(BaseModel):
 
 class NotificationDeliveryListResponse(BaseModel):
     deliveries: list[NotificationDeliverySchema]
+    total: int
+    limit: int
+    offset: int

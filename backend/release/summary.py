@@ -149,7 +149,7 @@ def generate_explanation_text(decision: DecisionSummary) -> str:
     return f"{decision.verdict} because " + " and ".join(clauses) + "."
 
 
-def _build_evidence_hierarchy(decision: DecisionSummary, evidence: ReleaseEvidence) -> list[EvidenceItem]:
+def _build_evidence_hierarchy(decision: DecisionSummary, evidence: ReleaseEvidence, primary_metric_direction: str) -> list[EvidenceItem]:
     """Task 2's fixed priority order: blocking guardrails, primary metric
     change, significant negative segments, economics impact, detected
     failure mechanisms, representative sessions. Each category is
@@ -163,9 +163,19 @@ def _build_evidence_hierarchy(decision: DecisionSummary, evidence: ReleaseEviden
 
     delta = decision.primary_metric_delta
     if delta is not None:
-        direction = "improved" if delta > 0 else "regressed" if delta < 0 else "was unchanged"
+        # A positive delta is only an "improvement" for a higher-is-better
+        # metric (e.g. conversion_rate) -- for a lower-is-better one (e.g.
+        # abandonment_rate), the SAME positive delta is a regression. Never
+        # infer this from the sign of delta alone.
+        increased_is_good = primary_metric_direction != "lower_is_better"
+        if delta == 0:
+            change_word = "was unchanged"
+        elif (delta > 0) == increased_is_good:
+            change_word = "improved"
+        else:
+            change_word = "regressed"
         p_text = f"p={decision.primary_metric_p_value:.2e}" if decision.primary_metric_p_value is not None else "p=n/a"
-        items.append(("primary_metric", f"Primary metric '{decision.primary_metric}' {direction} by {_pct_point(delta)} ({p_text})."))
+        items.append(("primary_metric", f"Primary metric '{decision.primary_metric}' {change_word} by {_pct_point(delta)} ({p_text})."))
 
     for seg in evidence.significant_negative_segments:
         p_text = f"p={seg.p_value:.2e}" if seg.p_value is not None else "p=n/a"
@@ -230,7 +240,9 @@ def build_release_summary(engine: Engine, adapter: DomainAdapter, evaluation: Re
 
     evidence = build_release_evidence(adapter, evaluation)
     explanation_text = generate_explanation_text(decision)
-    evidence_hierarchy = _build_evidence_hierarchy(decision, evidence)
+    primary_metric_def = next((m for m in adapter.metric_definitions() if m.name == evaluation.primary_metric), None)
+    primary_metric_direction = primary_metric_def.direction if primary_metric_def is not None else "higher_is_better"
+    evidence_hierarchy = _build_evidence_hierarchy(decision, evidence, primary_metric_direction)
 
     # Task 3: every significant finding, deterministically ordered (most
     # negative excess contribution first — the same order the Investigation

@@ -71,6 +71,27 @@ def test_login_fails_for_unknown_email(api_client):
     assert resp.status_code == 401
 
 
+def test_cors_preflight_allows_login_post_from_the_dev_frontend(api_client):
+    """Stage 16: allow_methods on the CORS middleware (backend.app.main)
+    was left at ["GET"] from Stage 6, when the frontend only ever read
+    data -- every mutating request since then, including login itself,
+    failed its browser preflight and never reached this router at all. A
+    browser sends an OPTIONS preflight with Access-Control-Request-Method
+    before any POST across an origin boundary; this pins that the
+    preflight for POST /auth/login (the one request that gates every
+    other screen) actually succeeds and allows POST."""
+    resp = api_client.options(
+        "/api/v1/auth/login",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    assert resp.status_code == 200
+    assert "POST" in resp.headers.get("access-control-allow-methods", "")
+
+
 def test_protected_endpoint_rejects_missing_token():
     from fastapi.testclient import TestClient
 

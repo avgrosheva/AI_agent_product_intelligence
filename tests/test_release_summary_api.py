@@ -179,6 +179,44 @@ def test_commerce_release_summary_works_and_is_tenant_scoped(api_client, experim
     assert body["decision"]["verdict"] == "HOLD"
 
 
+def test_evidence_hierarchy_labels_a_lower_is_better_metric_increase_as_regressed(api_client, experiment_id, commerce_project_id):
+    """A positive delta is only an "improvement" for a higher-is-better
+    metric. abandonment_rate is lower-is-better (backend.analytics.
+    metric_registry), so this planted regression -- v2's abandonment
+    rate is higher than v1's -- must be labeled "regressed", never
+    "improved", in the evidence hierarchy's primary-metric line."""
+    resp = api_client.post(f"/api/v1/domains/commerce/experiments/{experiment_id}/release-evaluations?primary_metric=abandonment_rate")
+    assert resp.status_code == 201
+    body = api_client.get(f"/api/v1/domains/commerce/experiments/{experiment_id}/release-summary").json()
+    assert body["decision"]["primary_metric_delta"] > 0  # abandonment went up
+
+    primary_metric_item = next(item for item in body["evidence_hierarchy"] if item["category"] == "primary_metric")
+    assert "regressed" in primary_metric_item["summary"]
+    assert "improved" not in primary_metric_item["summary"]
+
+
+def test_evidence_hierarchy_labels_a_higher_is_better_metric_correctly(api_client, experiment_id, commerce_project_id):
+    """conversion_rate is higher-is-better (backend.analytics.metric_registry
+    default direction) -- the mirror image of the lower-is-better case above.
+    The same positive delta that means "regressed" for abandonment_rate must
+    mean "improved" here, and vice versa; this pins the branch that was
+    previously hardcoded to "positive delta = improved" regardless of the
+    metric's direction."""
+    resp = api_client.post(f"/api/v1/domains/commerce/experiments/{experiment_id}/release-evaluations?primary_metric=conversion_rate")
+    assert resp.status_code == 201
+    body = api_client.get(f"/api/v1/domains/commerce/experiments/{experiment_id}/release-summary").json()
+    delta = body["decision"]["primary_metric_delta"]
+    assert delta is not None and delta != 0
+
+    primary_metric_item = next(item for item in body["evidence_hierarchy"] if item["category"] == "primary_metric")
+    if delta > 0:
+        assert "improved" in primary_metric_item["summary"]
+        assert "regressed" not in primary_metric_item["summary"]
+    else:
+        assert "regressed" in primary_metric_item["summary"]
+        assert "improved" not in primary_metric_item["summary"]
+
+
 def test_release_summary_is_project_scoped(api_client, support_project_id, test_identity):
     tag = f"sumiso-{uuid.uuid4().hex[:8]}"
     exp_id = _ingest_ship_fixture(api_client, support_project_id, tag)

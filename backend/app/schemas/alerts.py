@@ -23,3 +23,6 @@ class AlertSchema(BaseModel):
 
 class AlertListResponse(BaseModel):
     alerts: list[AlertSchema]
+    total: int
+    limit: int
+    offset: int

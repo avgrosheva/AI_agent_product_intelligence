@@ -5,6 +5,8 @@ finding), and the mandatory classifier evaluation report with provenance.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
@@ -15,14 +17,24 @@ from backend.app.schemas.ai_quality import (
     ClassifierAcceptanceBar,
     ClassifierEvaluationResponse,
     ClassifierPerClassMetric,
+    DeterministicDetectorMetric,
     FailureMechanismPrevalenceItem,
+    HybridEvaluationSummary,
+    SemanticMechanismMetric,
     ToolUseQualitySchema,
     TrajectoryPatternFrequencyItem,
 )
 from backend.app.schemas.common import ClassifierProvenance
 from backend.investigation.trajectory_attribution import canonicalize_patterns, reconstruct_trajectories
 from backend.llm.client import DETERMINISTIC_MECHANISMS, FAILURE_MECHANISMS
-from backend.llm.provenance import current_classifier_provenance_fields, get_evaluation_status, read_evaluation_summary
+from backend.llm.provenance import (
+    CURRENT_HYBRID_EVALUATION_SUMMARY_PATH,
+    DETERMINISTIC_DETECTORS_PERFECT_SCORE_NOTE,
+    current_classifier_provenance_fields,
+    get_evaluation_status,
+    read_current_hybrid_evaluation_summary,
+    read_evaluation_summary,
+)
 from backend.review.service import count_reviews_by_mechanism
 
 router = APIRouter(tags=["ai-quality"])
@@ -30,6 +42,49 @@ router = APIRouter(tags=["ai-quality"])
 
 def _classifier_provenance() -> ClassifierProvenance:
     return ClassifierProvenance(evaluation_status=get_evaluation_status(), **current_classifier_provenance_fields())
+
+
+def _hybrid_evaluation() -> HybridEvaluationSummary | None:
+    """Stage 16: the current hybrid pipeline's own held-out benchmark
+    (backend.llm.provenance.CURRENT_HYBRID_EVALUATION_SUMMARY_PATH), never
+    recomputed here -- only reshaped into the API's schema."""
+    raw = read_current_hybrid_evaluation_summary()
+    if raw is None:
+        return None
+    det = raw["deterministic"]["per_mechanism"]
+    sem = raw["semantic_metrics"]["per_mechanism"]
+    evaluated_at = None
+    if CURRENT_HYBRID_EVALUATION_SUMMARY_PATH.exists():
+        evaluated_at = datetime.fromtimestamp(CURRENT_HYBRID_EVALUATION_SUMMARY_PATH.stat().st_mtime, tz=timezone.utc).isoformat()
+    return HybridEvaluationSummary(
+        subset=raw["subset"],
+        provider="openrouter",
+        model=raw["model"],
+        prompt_version=raw["prompt_version"],
+        detector_version=raw["detector_version"],
+        evaluation_seed=raw["evaluation_seed"],
+        subset_size=raw["subset_size"],
+        deterministic_detectors=[
+            DeterministicDetectorMetric(failure_mode=name, precision=m["precision"], recall=m["recall"], f1=m["f1"], support=m["support"])
+            for name, m in det.items()
+        ],
+        deterministic_detectors_note=DETERMINISTIC_DETECTORS_PERFECT_SCORE_NOTE,
+        semantic_metrics=[
+            SemanticMechanismMetric(
+                failure_mode=name, precision=m["precision"], recall=m["recall"], f1=m["f1"], support=m["support"],
+                mean_confidence_correct=m.get("mean_confidence_correct"), mean_confidence_incorrect=m.get("mean_confidence_incorrect"),
+            )
+            for name, m in sem.items()
+        ],
+        semantic_micro_precision=raw["semantic_metrics"]["micro_precision"],
+        semantic_micro_recall=raw["semantic_metrics"]["micro_recall"],
+        semantic_micro_f1=raw["semantic_metrics"]["micro_f1"],
+        semantic_macro_f1=raw["semantic_metrics"]["macro_f1"],
+        semantic_exact_match_ratio=raw["semantic_metrics"]["exact_match_ratio"],
+        semantic_hamming_loss=raw["semantic_metrics"]["hamming_loss"],
+        semantic_coverage=raw["semantic_coverage"]["coverage"],
+        evaluated_at=evaluated_at,
+    )
 
 
 @router.get("/experiments/{experiment_id}/ai-quality", response_model=AIQualitySummaryResponse)
@@ -127,6 +182,7 @@ def get_classifier_evaluation(user: CurrentUser = Depends(get_current_user)) -> 
             provenance=provenance, n_sessions_evaluated=None, overall_accuracy=None,
             mean_confidence_correct=None, mean_confidence_incorrect=None,
             per_class_metrics=[], acceptance_bars=[], all_acceptance_bars_met=None,
+            hybrid_evaluation=_hybrid_evaluation(),
         )
 
     per_class = [
@@ -153,4 +209,5 @@ def get_classifier_evaluation(user: CurrentUser = Depends(get_current_user)) -> 
         per_class_metrics=per_class,
         acceptance_bars=acceptance_bars,
         all_acceptance_bars_met=summary.get("acceptance_bars_met"),
+        hybrid_evaluation=_hybrid_evaluation(),
     )

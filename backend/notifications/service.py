@@ -100,16 +100,21 @@ def list_channels(engine: Engine, project_id: str, enabled_only: bool = False) -
         return [_channel_to_result(r) for r in rows]
 
 
-def list_deliveries(engine: Engine, project_id: str, limit: int = 50) -> list[NotificationDeliveryResult]:
+def list_deliveries(engine: Engine, project_id: str, limit: int = 50, offset: int = 0) -> tuple[list[NotificationDeliveryResult], int]:
+    """Stage 17 task 7: one row is written here on every notification
+    attempt (every monitoring-triggered alert/release event a project has
+    a channel configured for), so this table grows indefinitely for an
+    active project -- same unbounded-growth shape as release history,
+    alerts, and the review queue. (page, total), newest first, tiebroken
+    on notification_id (descending) after created_at for the same reason
+    list_alerts and list_release_history are -- rows created in the same
+    timestamp resolution need a deterministic second key or separate
+    paginated queries can disagree on their relative order."""
     with OrmSession(engine) as session:
-        rows = (
-            session.query(NotificationDelivery)
-            .filter(NotificationDelivery.project_id == project_id)
-            .order_by(NotificationDelivery.created_at.desc())
-            .limit(limit)
-            .all()
-        )
-        return [_delivery_to_result(r) for r in rows]
+        query = session.query(NotificationDelivery).filter(NotificationDelivery.project_id == project_id)
+        total = query.count()
+        rows = query.order_by(NotificationDelivery.created_at.desc(), NotificationDelivery.notification_id.desc()).offset(offset).limit(limit).all()
+        return [_delivery_to_result(r) for r in rows], total
 
 
 def _summarize(event_type: str, dedup_key: str, summary: dict) -> str:

@@ -1,10 +1,14 @@
 import { Link } from 'react-router-dom'
-import { useInvestigation } from '../api/hooks'
+import { useDomainGuardrails } from '../api/hooks'
+import { CIRange } from '../components/common/CIRange'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
+import { GuardrailComparisonChart } from '../components/common/GuardrailComparisonChart'
 import { VerdictBadge } from '../components/common/VerdictBadge'
 import { formatDelta, formatMetricValue, formatPValue, humanizeMetricName } from '../lib/format'
 import { deltaDirection } from '../lib/metricPolarity'
+import type { MetricResult } from '../api/types'
 import { useActiveExperiment } from '../state/ActiveExperimentContext'
+import { useActiveProject } from '../state/ActiveProjectContext'
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
   ambiguous_investigate: { label: 'Requires investigation', cls: 'chip-warning' },
@@ -12,51 +16,68 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   not_yet_investigated: { label: 'Not yet investigated', cls: 'chip-neutral' },
 }
 
-function SignalCard({
-  kicker, metricName, v1, v2, verdict, pValue,
-}: {
-  kicker: string
-  metricName: string
-  v1: number | null
-  v2: number | null
-  verdict: 'significant' | 'not_significant' | 'insufficient_evidence'
-  pValue: number | null
-}) {
-  const direction = deltaDirection(metricName, v1, v2)
+/** The CI is rendered by default here, not hidden behind a "Detail"
+ * toggle the way MetricComparisonRow does it (Stage 16 task 4) — the
+ * Overview screen's whole purpose is "is this a real difference or
+ * noise" at a glance, and a delta chip alone can't answer that. */
+function SignalCard({ kicker, metric }: { kicker: string; metric: MetricResult }) {
+  const v1 = metric.cluster_mean_v1
+  const v2 = metric.cluster_mean_v2
+  const direction = deltaDirection(metric.metric_name, v1, v2)
   const directionCls = direction === 'good' ? 'chip-positive' : direction === 'bad' ? 'chip-negative' : 'chip-neutral'
   return (
     <div className="card">
       <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
         {kicker}
       </div>
-      <h3 style={{ marginBottom: 10 }}>{humanizeMetricName(metricName)}</h3>
+      <h3 style={{ marginBottom: 10 }}>{humanizeMetricName(metric.metric_name)}</h3>
       <div style={{ display: 'flex', gap: 18, marginBottom: 10 }}>
         <div>
           <div className="text-muted" style={{ fontSize: 11 }}>v1</div>
-          <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{formatMetricValue(metricName, v1)}</div>
+          <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{formatMetricValue(metric.metric_name, v1)}</div>
         </div>
         <div>
           <div className="text-muted" style={{ fontSize: 11 }}>v2</div>
-          <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{formatMetricValue(metricName, v2)}</div>
+          <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{formatMetricValue(metric.metric_name, v2)}</div>
         </div>
         <div>
           <div className="text-muted" style={{ fontSize: 11 }}>delta</div>
-          <span className={`chip ${directionCls}`}>{formatDelta(metricName, v1, v2)}</span>
+          <span className={`chip ${directionCls}`}>{formatDelta(metric.metric_name, v1, v2)}</span>
         </div>
       </div>
-      <VerdictBadge verdict={verdict} />
-      <div className="text-muted" style={{ fontSize: 11, marginTop: 6 }}>p = {formatPValue(pValue)}</div>
+      <VerdictBadge verdict={metric.verdict} />
+      {metric.ci_low !== null && metric.ci_high !== null ? (
+        <div style={{ marginTop: 8 }}>
+          <CIRange low={metric.ci_low} high={metric.ci_high} formatValue={(v) => formatDelta(metric.metric_name, 0, v)} />
+        </div>
+      ) : (
+        <div className="text-muted" style={{ fontSize: 11, marginTop: 6 }}>p = {formatPValue(metric.p_value)}</div>
+      )}
     </div>
   )
 }
 
+/** Stage 16: domain-generic (previously hardcoded to commerce's
+ * conversion_rate north star + a hardcoded 'abandonment' investigation
+ * lens, neither of which exist as concepts outside the legacy
+ * commerce-only API). The north-star card now reads this project's own
+ * configured primary_metric (backend already computes it per-experiment
+ * in list_domain_experiments); a project that hasn't configured one yet
+ * gets a clear prompt to do so instead of a card with no data. The
+ * second "AI/product behavior" card from the old two-metric layout is
+ * gone -- generically there is only one configured primary metric, so a
+ * second card here would just repeat the first. Guardrails are fetched
+ * directly (no full Investigation run) since Overview is meant to be
+ * cheap; the real Investigation only runs when the user clicks Investigate. */
 export function Overview() {
+  const { activeProject } = useActiveProject()
   const { activeExperimentId, activeExperiment, isLoading: expLoading, error: expError } = useActiveExperiment()
-  const { data: inv, isLoading: invLoading, error: invError } = useInvestigation(activeExperimentId ?? undefined, 'abandonment')
+  const domain = activeProject?.domain
+  const { data: guardrails, isLoading: guardrailsLoading } = useDomainGuardrails(domain, activeProject?.project_id, activeExperimentId ?? undefined)
 
   if (expLoading) return <div className="page"><LoadingState label="Loading experiments…" /></div>
-  if (expError) return <div className="page"><ErrorState message={expError} /></div>
-  if (!activeExperiment) return <div className="page"><EmptyState>No experiments found.</EmptyState></div>
+  if (expError) return <div className="page"><ErrorState error={expError} /></div>
+  if (!activeExperiment) return <div className="page"><EmptyState>No experiments found for this project yet.</EmptyState></div>
 
   const statusMeta = STATUS_META[activeExperiment.status_chip]
   const northStar = activeExperiment.north_star_metric
@@ -69,68 +90,53 @@ export function Overview() {
           <span className={`chip ${statusMeta.cls}`}>{statusMeta.label}</span>
         </div>
         <p className="text-secondary">
-          {activeExperiment.control_version} (control) vs {activeExperiment.treatment_version} (treatment) ·{' '}
-          {activeExperiment.n_users.toLocaleString('en-US')} users · {activeExperiment.n_sessions.toLocaleString('en-US')} sessions
+          {activeExperiment.control_version} (control) vs {activeExperiment.treatment_version} (treatment)
+          {activeExperiment.n_users != null && activeExperiment.n_sessions != null && (
+            <> · {activeExperiment.n_users.toLocaleString('en-US')} users · {activeExperiment.n_sessions.toLocaleString('en-US')} sessions</>
+          )}
         </p>
       </div>
 
-      <div className="grid-3">
-        <SignalCard
-          kicker="Business outcome · North star"
-          metricName={northStar.metric_name}
-          v1={northStar.cluster_mean_v1}
-          v2={northStar.cluster_mean_v2}
-          verdict={northStar.verdict}
-          pValue={northStar.p_value}
-        />
-        {invLoading && <div className="card"><LoadingState /></div>}
-        {invError && <div className="card"><ErrorState message={(invError as Error).message} /></div>}
-        {inv && (
-          <SignalCard
-            kicker="AI / product behavior · Primary regression signal"
-            metricName={inv.overall.metric_name}
-            v1={inv.overall.cluster_mean_v1}
-            v2={inv.overall.cluster_mean_v2}
-            verdict={inv.overall.verdict}
-            pValue={inv.overall.p_value}
-          />
-        )}
-        {inv && (
-          <div className="card">
-            <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-              Guardrails
-            </div>
-            <h3 style={{ marginBottom: 10 }}>{inv.any_guardrail_breach ? 'Breach detected' : 'All within threshold'}</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {inv.guardrails.map((g) => (
-                <div key={g.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
-                  <span>{g.name.replace(/_/g, ' ')}</span>
-                  <span className={`chip ${g.breached ? 'chip-negative' : 'chip-neutral'}`} style={{ fontSize: 10.5 }}>
-                    {g.breached ? 'breached' : 'ok'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {inv && (
+      {!northStar ? (
         <div className="card">
-          <h2 style={{ marginBottom: 10 }}>Summary</h2>
-          <p style={{ fontSize: 13.5, lineHeight: 1.7 }}>
-            {northStar.verdict === 'significant' ? 'Conversion moved with statistical significance.' : 'Conversion is broadly flat / inconclusive at the aggregate level (not statistically significant).'}{' '}
-            {inv.overall.verdict === 'significant' && (inv.overall.cluster_mean_v2 ?? 0) > (inv.overall.cluster_mean_v1 ?? 0)
-              ? 'Abandonment is significantly higher in v2 overall.'
-              : 'Abandonment shows no clear aggregate regression.'}{' '}
-            {inv.any_guardrail_breach
-              ? `A guardrail is breached (${inv.guardrails.filter((g) => g.breached).map((g) => g.name).join(', ')}), which on its own is enough to block a ship decision regardless of the north star.`
-              : 'No guardrail is currently breached.'}{' '}
-            This combination of a flat headline metric, a mechanism-level regression, and a guardrail breach is exactly the pattern that needs segment-level investigation rather than a snap judgment from the aggregate numbers.
+          <p className="text-secondary">
+            This project doesn't have a primary metric configured yet, so there's no north-star signal to show here.
           </p>
-          <Link to={activeExperimentId ? `/experiments/${activeExperimentId}/investigation` : '#'} className="btn btn-primary" style={{ marginTop: 14 }}>
-            Investigate →
+          <Link to="/setup" className="btn btn-primary" style={{ marginTop: 10 }}>
+            Configure a primary metric →
           </Link>
+        </div>
+      ) : (
+        <div className="grid-2">
+          <SignalCard kicker="Primary metric · North star" metric={northStar} />
+
+          <div className="card">
+            <h2 style={{ marginBottom: 10 }}>Summary</h2>
+            <p style={{ fontSize: 13.5, lineHeight: 1.7 }}>
+              {northStar.verdict === 'significant'
+                ? `${humanizeMetricName(northStar.metric_name)} moved with statistical significance.`
+                : `${humanizeMetricName(northStar.metric_name)} is broadly flat / inconclusive at the aggregate level (not statistically significant).`}{' '}
+              {guardrails?.any_breach
+                ? `A guardrail is breached (${guardrails.checks.filter((g) => g.breached).map((g) => g.name).join(', ')}), which on its own is enough to block a ship decision regardless of the north star.`
+                : 'No guardrail is currently breached.'}{' '}
+              This is exactly the kind of case that needs segment-level investigation rather than a snap judgment from the aggregate numbers.
+            </p>
+            <Link to={activeExperimentId ? `/experiments/${activeExperimentId}/investigation` : '#'} className="btn btn-primary" style={{ marginTop: 14 }}>
+              Investigate →
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {guardrailsLoading && <div className="card"><LoadingState /></div>}
+      {guardrails && (
+        <div className="card">
+          <div className="card-header">
+            <h2>Guardrails</h2>
+          </div>
+          <h3 style={{ marginBottom: 12 }}>{guardrails.any_breach ? 'Breach detected' : 'All within threshold'}</h3>
+          <GuardrailComparisonChart checks={guardrails.checks} />
+          {guardrails.checks.length === 0 && <EmptyState>No guardrails configured.</EmptyState>}
         </div>
       )}
     </div>

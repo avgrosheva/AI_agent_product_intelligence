@@ -1,4 +1,4 @@
-import type { Finding, GuardrailCheck, MetricResult } from '../../api/types'
+import type { Finding, GenericGuardrailCheck, MetricResult } from '../../api/types'
 import { ContributionChart, type ContributionRow } from '../common/ContributionChart'
 import { formatDelta, formatMetricValue, formatPercent, humanizeSegmentLabel } from '../../lib/format'
 import { isAndroidLatencySegment } from '../../lib/knownMechanisms'
@@ -17,7 +17,7 @@ export function MechanismPanel({
 }: {
   finding: Finding
   metricsByName: Record<string, MetricResult>
-  guardrails: GuardrailCheck[]
+  guardrails: GenericGuardrailCheck[]
 }) {
   const isLatency = isAndroidLatencySegment(finding)
   const fa = finding.failure_attribution

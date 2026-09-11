@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import { SessionDetail } from './SessionDetail'
 import { renderWithProviders } from '../test/renderWithProviders'
-import { SESSION_DETAIL_FIXTURE } from '../test/fixtures'
+import { GENERIC_SESSION_DETAIL_FIXTURE } from '../test/fixtures'
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -11,9 +11,9 @@ vi.mock('../api/client', async () => {
 })
 
 describe('SessionDetail page', () => {
-  it('renders the timeline, recommendations, evaluations, and failure classification', async () => {
+  it('renders the transcript, action sequence, tool calls, and failure classification', async () => {
     renderWithProviders(<SessionDetail />, {
-      route: `/sessions/${SESSION_DETAIL_FIXTURE.session_id}`,
+      route: `/sessions/${GENERIC_SESSION_DETAIL_FIXTURE.session_id}`,
       path: '/sessions/:sessionId',
     })
 
@@ -26,7 +26,7 @@ describe('SessionDetail page', () => {
 
   it('shows classifier provenance / mock disclaimer for a mock-classified session', async () => {
     renderWithProviders(<SessionDetail />, {
-      route: `/sessions/${SESSION_DETAIL_FIXTURE.session_id}`,
+      route: `/sessions/${GENERIC_SESSION_DETAIL_FIXTURE.session_id}`,
       path: '/sessions/:sessionId',
     })
 
@@ -36,7 +36,7 @@ describe('SessionDetail page', () => {
 
   it('does not render chain-of-thought — only observable action types', async () => {
     renderWithProviders(<SessionDetail />, {
-      route: `/sessions/${SESSION_DETAIL_FIXTURE.session_id}`,
+      route: `/sessions/${GENERIC_SESSION_DETAIL_FIXTURE.session_id}`,
       path: '/sessions/:sessionId',
     })
     await waitFor(() => expect(screen.getByText('search_products')).toBeInTheDocument())

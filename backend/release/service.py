@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session as OrmSession
 
+from backend.analytics.cache_utils import investigation_cache, investigation_config_fingerprint, metric_defs_fingerprint, metrics_table_cache
 from backend.analytics.experiment_results import analyze_all_metrics
 from backend.core.adapter import DomainAdapter
 from backend.core.analysis_window import AnalysisWindow
@@ -145,6 +146,7 @@ def evaluate_release(
     adapter: DomainAdapter,
     primary_metric_name: str,
     window: AnalysisWindow | None = None,
+    project_id: str | None = None,
 ) -> tuple[InvestigationResult, dict]:
     """Runs the Investigation engine for this (domain, experiment_id,
     primary_metric) — pure computation, no persistence — and returns both
@@ -155,14 +157,37 @@ def evaluate_release(
     Stage 13 task 1/3: `window`, when given, is passed straight through
     to the adapter — this function has no filtering logic of its own,
     generic or domain-specific. `None` (a manual evaluation) means the
-    full dataset, exactly as before Stage 13 (task 4)."""
+    full dataset, exactly as before Stage 13 (task 4).
+
+    Stage 17 task 5/6 perf fix: this used to call run_investigation and
+    analyze_all_metrics directly, bypassing the caches
+    backend.app.routers.domains applies to the exact same computation for
+    GET .../metrics and GET .../investigation — measured at ~64s for a
+    single "Evaluate now" click (both the on-demand POST
+    .../release-evaluations endpoint and every scheduled monitoring run go
+    through this function), unmoved by any of the caching added elsewhere
+    in Stage 17 since none of it touched this call path. Now goes through
+    the SAME shared caches (backend.analytics.cache_utils) the router
+    uses, keyed the same way plus `window`'s bounds (a windowed evaluation
+    over different data must not collide with the unwindowed one, or with
+    a different window) and `project_id` (optional here only because some
+    callers historically had none available; passing it, when known,
+    keeps this cache key exactly as collision-safe as the router's)."""
     config = investigation_config_from_adapter(adapter)
     base_df = adapter.analytics_base_df(experiment_id=experiment_id, window=window)
     agent_actions_df = adapter.agent_actions_df(experiment_id=experiment_id, window=window)
     failure_attributions_wide_df = adapter.failure_attributions_wide_df()
+    window_key = (window.start, window.end) if window is not None else None
 
-    result = run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, config, primary_metric_name=primary_metric_name)
-    all_metric_results = analyze_all_metrics(base_df, config.metric_registry, metric_value_columns=config.metric_value_columns)
+    result = investigation_cache.get_or_compute(
+        (domain, project_id, experiment_id, primary_metric_name, investigation_config_fingerprint(config), window_key,
+         len(base_df), len(agent_actions_df), len(failure_attributions_wide_df)),
+        lambda: run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, config, primary_metric_name=primary_metric_name),
+    )
+    all_metric_results = metrics_table_cache.get_or_compute(
+        (domain, project_id, experiment_id, metric_defs_fingerprint(config.metric_registry), window_key, len(base_df)),
+        lambda: analyze_all_metrics(base_df, config.metric_registry, metric_value_columns=config.metric_value_columns),
+    )
     fields = _investigation_to_release_fields(result, all_metric_results)
     fields["economics"] = _economics_to_dict(compute_economics(base_df, adapter.economics_config()))
     return result, fields
@@ -262,7 +287,7 @@ def evaluate_and_persist_release(
     API endpoint) never passes them, so its behavior is byte-identical to
     before Stage 13 (task 4). backend.monitoring.service.run_monitoring_job
     is the one caller that does, for a config with window_hours set."""
-    result, fields = evaluate_release(domain, experiment_id, adapter, primary_metric_name, window=window)
+    result, fields = evaluate_release(domain, experiment_id, adapter, primary_metric_name, window=window, project_id=project_id)
 
     data_quality_status = "healthy"
     if project_id is not None:
@@ -332,10 +357,24 @@ def get_latest_release_status(engine: Engine, domain: str, experiment_id: str, p
     return _row_to_result(row) if row is not None else None
 
 
-def list_release_history(engine: Engine, domain: str, experiment_id: str, project_id: str | None = None, limit: int = 20) -> list[ReleaseEvaluationResult]:
+def list_release_history(
+    engine: Engine, domain: str, experiment_id: str, project_id: str | None = None, limit: int = 20, offset: int = 0
+) -> tuple[list[ReleaseEvaluationResult], int]:
+    """Stage 17 task 7: a project on a short monitoring cadence accumulates
+    one row here per scheduled run indefinitely — `limit` alone (the
+    original signature) always returned only the newest page with no way
+    to see anything older and no way for a caller to know more exists.
+    Same shape as list_review_queue: newest-first, (page, total) so a
+    caller can page and render "N of M". Tiebroken on evaluation_id
+    (descending) after evaluated_at: two evaluations run back-to-back can
+    land in the same timestamp resolution, and without a deterministic
+    second key, separate paginated queries over the same tied rows are not
+    guaranteed to agree on their relative order (backend.alerts.service
+    .list_alerts hit exactly this as a real, reproducible test failure)."""
     with OrmSession(engine) as session:
         query = session.query(ReleaseEvaluation).filter(ReleaseEvaluation.domain == domain, ReleaseEvaluation.experiment_id == experiment_id)
         if project_id is not None:
             query = query.filter(ReleaseEvaluation.project_id == project_id)
-        rows = query.order_by(ReleaseEvaluation.evaluated_at.desc()).limit(limit).all()
-    return [_row_to_result(r) for r in rows]
+        total = query.count()
+        rows = query.order_by(ReleaseEvaluation.evaluated_at.desc(), ReleaseEvaluation.evaluation_id.desc()).offset(offset).limit(limit).all()
+    return [_row_to_result(r) for r in rows], total

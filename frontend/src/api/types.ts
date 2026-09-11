@@ -52,79 +52,13 @@ export interface ClassifierProvenance {
 
 export type StatusChip = 'ambiguous_investigate' | 'no_regression_detected' | 'not_yet_investigated'
 
-export interface ExperimentSummary {
-  experiment_id: string
-  name: string
-  control_version: string
-  treatment_version: string
-  start_date: string
-  end_date: string
-  status: string
-  n_sessions: number
-  n_users: number
-  north_star_metric: MetricResult
-  status_chip: StatusChip
-}
-
-export interface ExperimentListResponse {
-  experiments: ExperimentSummary[]
-}
-
-export interface ExperimentDetail {
-  experiment_id: string
-  name: string
-  control_version: string
-  treatment_version: string
-  start_date: string
-  end_date: string
-  status: string
-  traffic_split: number
-  n_sessions_v1: number
-  n_sessions_v2: number
-  n_users_v1: number
-  n_users_v2: number
-}
-
-export interface MetricTableResponse {
-  experiment_id: string
-  metrics: MetricResult[]
-}
-
-export interface FunnelStep {
-  agent_version: 'v1' | 'v2'
-  n_sessions: number
-  n_impression: number
-  n_click: number
-  n_cart: number
-  n_purchase: number
-  impression_to_click_rate: number | null
-  click_to_cart_rate: number | null
-  cart_to_purchase_rate: number | null
-}
-
-export interface FunnelResponse {
-  experiment_id: string
-  funnel: FunnelStep[]
-}
-
-export interface GuardrailCheck {
-  name: string
-  v1_value: number
-  v2_value: number
-  threshold_description: string
-  breached: boolean
-}
-
-export interface GuardrailResponse {
-  experiment_id: string
-  checks: GuardrailCheck[]
-  any_breach: boolean
-}
-
 // ---- Investigation ----
-
-export type InvestigationLens = 'abandonment' | 'conversion' | 'constraint_satisfaction'
-export type LensRole = 'primary_regression_lens' | 'north_star_context' | 'ai_quality_lens'
+// Finding/Recommendation/ExploredSegmentSummary and their nested types
+// below are shared verbatim between the generic investigation response
+// (GenericInvestigationResponse, further down) and backend.app.schemas.
+// investigation — there is only one Investigation shape now (Stage 16
+// retired the legacy commerce-only /investigation endpoint's lens
+// concept from the frontend), so there is only one set of types for it.
 
 export interface SegmentFilter {
   dimensions: Record<string, string>
@@ -190,155 +124,6 @@ export interface ExploredSegmentSummary {
   verdict: string
 }
 
-export interface InvestigationResponse {
-  experiment_id: string
-  lens: InvestigationLens
-  lens_role: LensRole
-  lens_description: string
-  primary_metric: string
-  overall: MetricResult
-  guardrails: GuardrailCheck[]
-  any_guardrail_breach: boolean
-  findings: Finding[]
-  explored_not_significant: ExploredSegmentSummary[]
-  recommendation: Recommendation
-}
-
-// ---- Sessions ----
-
-export interface SessionSummary {
-  session_id: string
-  agent_version: string
-  requested_category: string
-  constraint_count_bucket: string
-  platform: string
-  device_tier: string
-  locale: string
-  persona: string
-  outcome: string
-  num_turns: number
-  total_latency_ms: number
-  total_cost_usd: number
-  started_at: string
-  detected_failure_modes: string[]
-}
-
-export interface SessionListResponse {
-  items: SessionSummary[]
-  total: number
-  limit: number
-  offset: number
-  filters_applied: Record<string, string>
-}
-
-export interface MessageItem {
-  turn_index: number
-  sender: string
-  text: string
-  tokens: number
-  latency_ms: number | null
-  created_at: string
-}
-
-export interface AgentAction {
-  sequence_index: number
-  action_type: string
-  latency_ms: number
-  model_name: string
-  started_at: string
-}
-
-export interface ToolCall {
-  tool_name: string
-  success: boolean
-  error_type: string
-  latency_ms: number
-  action_sequence_index: number
-  action_started_at: string
-}
-
-export interface RecommendationItem {
-  product_id: string
-  rank_position: number
-  clicked: boolean
-  satisfies_constraints: boolean
-}
-
-export interface ProductEvent {
-  event_type: string
-  event_time: string
-  price_at_event: number
-}
-
-export interface EvaluationItem {
-  eval_type: string
-  score: number
-  evaluator: string
-}
-
-export interface FailureClassification {
-  failure_mode: string
-  detector_source: string // "deterministic" | "real_llm" | "mock_llm"
-  confidence: number | null
-  evidence_text: string | null
-  provenance: ClassifierProvenance
-}
-
-export interface SessionDetail {
-  session_id: string
-  agent_version: string
-  requested_category: string
-  constraint_count_bucket: string
-  platform: string
-  device_tier: string
-  locale: string
-  persona: string
-  num_constraints: number
-  outcome: string
-  num_turns: number
-  total_latency_ms: number
-  total_tokens_in: number
-  total_tokens_out: number
-  total_cost_usd: number
-  started_at: string
-  ended_at: string | null
-  transcript: MessageItem[]
-  agent_actions: AgentAction[]
-  tool_calls: ToolCall[]
-  recommendations: RecommendationItem[]
-  product_events: ProductEvent[]
-  evaluations: EvaluationItem[]
-  failure_attributions: FailureClassification[]
-}
-
-// ---- AI Quality ----
-
-export interface FailureMechanismPrevalenceItem {
-  failure_mode: string
-  detector_source: string // "deterministic" | "real_llm" | "mock_llm"
-  count_v1: number
-  count_v2: number
-  rate_v1: number
-  rate_v2: number
-}
-
-export interface ToolUseQuality {
-  tool_calls_per_session_v1: number
-  tool_calls_per_session_v2: number
-  tool_success_rate_v1: number
-  tool_success_rate_v2: number
-  tool_error_rate_v1: number
-  tool_error_rate_v2: number
-}
-
-export interface TrajectoryPatternFrequency {
-  pattern: string
-  n_sessions_v1: number
-  n_sessions_v2: number
-  abandonment_rate_v1: number
-  abandonment_rate_v2: number
-}
-
 export interface ClassifierPerClassMetric {
   failure_mode: string
   support: number
@@ -357,6 +142,45 @@ export interface ClassifierAcceptanceBar {
   precision_pass: boolean
 }
 
+export interface DeterministicDetectorMetric {
+  failure_mode: string
+  precision: number
+  recall: number
+  f1: number
+  support: number
+}
+
+export interface SemanticMechanismMetric {
+  failure_mode: string
+  precision: number
+  recall: number
+  f1: number
+  support: number
+  mean_confidence_correct: number | null
+  mean_confidence_incorrect: number | null
+}
+
+export interface HybridEvaluationSummary {
+  subset: string
+  provider: string
+  model: string
+  prompt_version: string
+  detector_version: string
+  evaluation_seed: number
+  subset_size: number
+  deterministic_detectors: DeterministicDetectorMetric[]
+  deterministic_detectors_note: string
+  semantic_metrics: SemanticMechanismMetric[]
+  semantic_micro_precision: number
+  semantic_micro_recall: number
+  semantic_micro_f1: number
+  semantic_macro_f1: number
+  semantic_exact_match_ratio: number
+  semantic_hamming_loss: number
+  semantic_coverage: number
+  evaluated_at: string | null
+}
+
 export interface ClassifierEvaluationResponse {
   provenance: ClassifierProvenance
   n_sessions_evaluated: number | null
@@ -366,14 +190,7 @@ export interface ClassifierEvaluationResponse {
   per_class_metrics: ClassifierPerClassMetric[]
   acceptance_bars: ClassifierAcceptanceBar[]
   all_acceptance_bars_met: boolean | null
-}
-
-export interface AIQualitySummaryResponse {
-  experiment_id: string
-  failure_mechanism_prevalence: FailureMechanismPrevalenceItem[]
-  tool_use_quality: ToolUseQuality
-  trajectory_patterns: TrajectoryPatternFrequency[]
-  classifier_provenance: ClassifierProvenance
+  hybrid_evaluation: HybridEvaluationSummary | null
 }
 
 export interface ApiErrorBody {
@@ -453,4 +270,438 @@ export interface ReleaseSummaryResponse {
   economics: Record<string, unknown> | null
   data_quality_status: DataQualityStatus
   monitoring_window: MonitoringWindowInfo
+}
+
+// -- Stage 15: auth/org/project + onboarding & project-config UI ----
+
+export interface UserAccount {
+  user_id: string
+  email: string
+  created_at: string
+}
+
+export interface Membership {
+  membership_id: string
+  org_id: string
+  user_id: string
+  email: string
+  role: 'admin' | 'analyst' | 'viewer'
+  created_at: string
+}
+
+export interface Project {
+  project_id: string
+  org_id: string
+  name: string
+  domain: string
+  created_at: string
+}
+
+export interface Organization {
+  org_id: string
+  name: string
+  created_at: string
+}
+
+export interface MeResponse {
+  user: UserAccount
+  memberships: Membership[]
+  projects: Project[]
+}
+
+export interface AvailableMetric {
+  name: string
+  label: string
+  metric_type: string
+  direction: string
+  semantic_class: string
+  is_inferential: boolean
+  is_descriptive: boolean
+  value_column: string | null
+}
+
+export interface AvailableGuardrail {
+  name: string
+  metric: string
+  column: string
+  aggregation: string
+  kind: string
+  direction: string
+  threshold: number
+  severity: string
+  enabled: boolean
+}
+
+export interface ProjectConfig {
+  project_id: string
+  primary_metric: string | null
+  metrics: { metrics: MetricConfigEntry[] } | null
+  guardrails: { guardrails: GuardrailConfigEntry[] } | null
+  segment_dimensions: Record<string, string[]> | null
+  economics: EconomicsConfigJson | null
+  monitoring_cadence_seconds: number | null
+  enabled_notification_rules: string[]
+  created_at: string | null
+  updated_at: string | null
+  available_metrics: AvailableMetric[]
+  available_guardrails: AvailableGuardrail[]
+  available_context_fields: string[]
+}
+
+export interface MetricConfigEntry {
+  name: string
+  label?: string
+  type?: string
+  direction?: string
+  value_column?: string
+  is_inferential?: boolean
+  is_descriptive?: boolean
+  eligibility?: Record<string, unknown>
+}
+
+export interface GuardrailConfigEntry {
+  name: string
+  metric?: string
+  column: string
+  aggregation: string
+  kind?: string
+  direction?: string
+  threshold: number
+  severity?: string
+  enabled?: boolean
+}
+
+export interface EconomicsConfigJson {
+  cost_column?: string
+  success_column: string
+  value_column?: string
+}
+
+export interface ProjectConfigPatch {
+  primary_metric?: string | null
+  metrics?: { metrics: MetricConfigEntry[] } | null
+  guardrails?: { guardrails: GuardrailConfigEntry[] } | null
+  segment_dimensions?: Record<string, string[]> | null
+  economics?: EconomicsConfigJson | null
+  monitoring_cadence_seconds?: number | null
+  enabled_notification_rules?: string[] | null
+}
+
+export interface OnboardingStatus {
+  project_id: string
+  domain: string
+  ingestion_connected: boolean
+  data_received: boolean
+  primary_metric_configured: boolean
+  guardrails_configured: boolean
+  data_quality_status: DataQualityStatus | 'not_applicable'
+  monitoring_enabled: boolean
+  notifications_configured: boolean
+}
+
+export interface DataQualityCheck {
+  name: string
+  value: number | string | null
+  status: string
+  detail: string
+}
+
+export interface DataQualityReport {
+  project_id: string
+  domain: string
+  status: DataQualityStatus | 'not_applicable'
+  generated_at: string
+  checks: DataQualityCheck[]
+}
+
+export interface MonitoringConfig {
+  config_id: string
+  project_id: string
+  domain: string
+  experiment_id: string
+  primary_metric: string
+  cadence_seconds: number
+  window_hours: number | null
+  enabled: boolean
+  created_at: string
+}
+
+export interface MonitoringConfigListResponse {
+  configs: MonitoringConfig[]
+}
+
+export interface MonitoringRun {
+  run_id: string
+  config_id: string | null
+  project_id: string
+  domain: string
+  experiment_id: string
+  primary_metric: string
+  status: 'running' | 'succeeded' | 'failed' | 'skipped_duplicate'
+  started_at: string
+  completed_at: string | null
+  data_window_start: string | null
+  data_window_end: string | null
+  window_hours: number | null
+  release_evaluation_id: string | null
+  failure_reason: string | null
+}
+
+export interface NotificationChannel {
+  channel_id: string
+  project_id: string
+  channel_type: 'webhook' | 'slack_webhook'
+  url_preview: string
+  enabled: boolean
+  created_at: string
+}
+
+export interface NotificationChannelListResponse {
+  channels: NotificationChannel[]
+}
+
+export interface GenericExperimentSummary {
+  experiment_id: string
+  name: string
+  control_version: string
+  treatment_version: string
+  start_date: string | null
+  end_date: string | null
+  n_sessions: number | null
+  n_users: number | null
+  north_star_metric: MetricResult | null
+  status_chip: StatusChip
+}
+
+export interface GenericExperimentListResponse {
+  domain: string
+  experiments: GenericExperimentSummary[]
+}
+
+export interface ReleaseEvaluation {
+  evaluation_id: string
+  domain: string
+  experiment_id: string
+  primary_metric: string
+  status: ReleaseVerdict
+  evaluated_at: string
+  has_negative_segment: boolean
+  any_guardrail_breach: boolean
+  primary_reason: string
+  next_action: string
+  key_metrics: Record<string, unknown>
+  breached_guardrails: Record<string, unknown>[]
+  top_findings: Record<string, unknown>[]
+  project_id: string | null
+  economics: Record<string, unknown> | null
+  raw_status: ReleaseVerdict
+  data_quality_status: DataQualityStatus
+  data_quality_gated: boolean
+  data_window_start: string | null
+  data_window_end: string | null
+  window_hours: number | null
+}
+
+export interface ReleaseHistoryResponse {
+  domain: string
+  experiment_id: string
+  evaluations: ReleaseEvaluation[]
+  total: number
+  limit: number
+  offset: number
+}
+
+// -- Stage 16: the generic, domain-parametrized equivalents of the
+// legacy commerce-only endpoints above (backend/app/routers/domains.py)
+// -- same field shapes, driven by (domain, project_id) instead of an
+// implicit single commerce project, so both commerce and support
+// projects render through the same screens.
+
+export interface GenericMetricTableResponse {
+  domain: string
+  experiment_id: string
+  metrics: MetricResult[]
+}
+
+export interface GenericGuardrailCheck {
+  name: string
+  metric: string
+  v1_value: number
+  v2_value: number
+  threshold_description: string
+  breached: boolean
+  severity: 'blocking' | 'warning'
+}
+
+export interface GenericGuardrailResponse {
+  domain: string
+  experiment_id: string
+  checks: GenericGuardrailCheck[]
+  any_breach: boolean
+  any_warning_breach: boolean
+}
+
+export interface GenericInvestigationResponse {
+  domain: string
+  experiment_id: string
+  primary_metric: string
+  overall: MetricResult
+  guardrails: GenericGuardrailCheck[]
+  any_guardrail_breach: boolean
+  findings: Finding[]
+  explored_not_significant: ExploredSegmentSummary[]
+  recommendation: Recommendation
+}
+
+export interface Mechanism {
+  name: string
+  source: 'deterministic' | 'semantic'
+  description: string
+}
+
+export interface MechanismListResponse {
+  domain: string
+  mechanisms: Mechanism[]
+}
+
+export type ReviewStatus = 'unreviewed' | 'confirmed' | 'rejected' | 'mixed'
+
+export interface GenericSessionSummary {
+  session_id: string
+  agent_version: string
+  outcome: string | null
+  started_at: string | null
+  detected_mechanisms: string[]
+  review_status: ReviewStatus
+}
+
+export interface GenericSessionListResponse {
+  domain: string
+  items: GenericSessionSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface SegmentDimensionsResponse {
+  domain: string
+  dimensions: Record<string, string[]>
+}
+
+export interface GenericToolCall {
+  tool_name: string
+  success: boolean
+  error_type: string
+}
+
+export interface GenericFailureAttribution {
+  failure_mode: string
+  detector_source: string
+  confidence: number | null
+  evidence_text: string | null
+  review_status: 'unreviewed' | 'confirmed' | 'rejected'
+  corrected_mechanism: string | null
+  review_note: string | null
+}
+
+export interface GenericSessionDetailResponse {
+  domain: string
+  session_id: string
+  outcome: string
+  transcript: string[][]
+  action_sequence: string[]
+  tool_calls: GenericToolCall[]
+  failure_attributions: GenericFailureAttribution[]
+}
+
+export interface NegativeSegmentEvidence {
+  segment_label: string
+  dimensions: string[]
+  p_value: number | null
+  excess_contribution: number | null
+  dominant_failure_mode: string | null
+  representative_session_ids: string[]
+}
+
+export interface SessionEvidence {
+  session_id: string
+  segment_label: string
+  outcome: string
+  transcript_excerpt: string[][]
+  action_sequence: string[]
+}
+
+export interface LinkedMechanism {
+  session_id: string
+  failure_mode: string
+  detector_source: string
+  confidence: number | null
+  evidence_text: string | null
+}
+
+export interface ReleaseEvidenceResponse {
+  evaluation_id: string
+  domain: string
+  experiment_id: string
+  status: string
+  breached_guardrails: Record<string, unknown>[]
+  significant_negative_segments: NegativeSegmentEvidence[]
+  representative_sessions: SessionEvidence[]
+  linked_failure_mechanisms: LinkedMechanism[]
+}
+
+export interface GenericFunnelStagePoint {
+  stage: string
+  n_sessions: number
+  conversion_from_previous: number | null
+}
+
+export interface GenericFunnelSeries {
+  agent_version: string
+  n_sessions: number
+  stages: GenericFunnelStagePoint[]
+}
+
+export interface GenericFunnelResponse {
+  domain: string
+  experiment_id: string
+  applicable: boolean
+  series: GenericFunnelSeries[]
+}
+
+export interface GenericFailureMechanismPrevalenceItem {
+  failure_mode: string
+  detector_source: string
+  count_v1: number
+  count_v2: number
+  rate_v1: number
+  rate_v2: number
+  reviewed_count: number
+  confirmed_count: number
+  rejected_count: number
+}
+
+export interface GenericToolUseQuality {
+  tool_calls_per_session_v1: number | null
+  tool_calls_per_session_v2: number | null
+  tool_success_rate_v1: number | null
+  tool_success_rate_v2: number | null
+  tool_error_rate_v1: number | null
+  tool_error_rate_v2: number | null
+}
+
+export interface GenericTrajectoryPatternItem {
+  pattern: string
+  n_sessions_v1: number
+  n_sessions_v2: number
+  negative_outcome_rate_v1: number
+  negative_outcome_rate_v2: number
+}
+
+export interface GenericAIQualitySummaryResponse {
+  domain: string
+  experiment_id: string
+  failure_mechanism_prevalence: GenericFailureMechanismPrevalenceItem[]
+  tool_use_quality: GenericToolUseQuality
+  trajectory_patterns: GenericTrajectoryPatternItem[]
 }

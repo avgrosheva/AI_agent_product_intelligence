@@ -75,10 +75,30 @@ export async function apiGet<T>(path: string, params?: Record<string, string | n
   return handleResponse<T>(res)
 }
 
-export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+export async function apiPost<T>(path: string, body?: unknown, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(path, BASE_URL)
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) url.searchParams.set(key, String(value))
+    }
+  }
   const res = await fetch(url.toString(), {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+  return handleResponse<T>(res)
+}
+
+export async function apiPut<T>(path: string, body?: unknown, params?: Record<string, string | number | undefined>): Promise<T> {
+  const url = new URL(path, BASE_URL)
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) url.searchParams.set(key, String(value))
+    }
+  }
+  const res = await fetch(url.toString(), {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })

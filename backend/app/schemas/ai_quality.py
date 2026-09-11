@@ -74,6 +74,59 @@ class ClassifierEvaluationResponse(BaseModel):
     per_class_metrics: list[ClassifierPerClassMetric]
     acceptance_bars: list[ClassifierAcceptanceBar]
     all_acceptance_bars_met: bool | None
+    # Stage 16: the CURRENT architecture's own evaluation, additive and
+    # independent of the fields above (which are the deprecated exclusive
+    # classifier's shape, kept only for that historical evaluation path —
+    # AI_EVALUATION.md SS2). None until a hybrid benchmark has been run
+    # and its summary committed to reports/final/.
+    hybrid_evaluation: HybridEvaluationSummary | None = None
+
+
+class DeterministicDetectorMetric(BaseModel):
+    failure_mode: str
+    precision: float
+    recall: float
+    f1: float
+    support: int
+
+
+class SemanticMechanismMetric(BaseModel):
+    failure_mode: str
+    precision: float
+    recall: float
+    f1: float
+    support: int
+    mean_confidence_correct: float | None
+    mean_confidence_incorrect: float | None
+
+
+class HybridEvaluationSummary(BaseModel):
+    """Stage 16: the current hybrid multi-label attribution pipeline's own
+    evaluation (AI_EVALUATION.md SS5) — a held-out benchmark against
+    independent multi-label ground truth, distinct in shape from
+    ClassifierEvaluationResponse's per_class_metrics/acceptance_bars above
+    (which target the deprecated exclusive classifier). Read from
+    scripts/run_hybrid_benchmark.py's persisted output, never recomputed
+    here."""
+
+    subset: str
+    provider: str
+    model: str
+    prompt_version: str
+    detector_version: str
+    evaluation_seed: int
+    subset_size: int
+    deterministic_detectors: list[DeterministicDetectorMetric]
+    deterministic_detectors_note: str
+    semantic_metrics: list[SemanticMechanismMetric]
+    semantic_micro_precision: float
+    semantic_micro_recall: float
+    semantic_micro_f1: float
+    semantic_macro_f1: float
+    semantic_exact_match_ratio: float
+    semantic_hamming_loss: float
+    semantic_coverage: float
+    evaluated_at: str | None
 
 
 class AIQualitySummaryResponse(BaseModel):

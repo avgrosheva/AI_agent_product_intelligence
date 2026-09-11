@@ -17,7 +17,7 @@ describe('Experiment page', () => {
     await waitFor(() => expect(screen.getByText('Experiment metadata')).toBeInTheDocument())
     expect(screen.getByText('Conversion rate')).toBeInTheDocument()
     expect(screen.getByText('Abandonment rate')).toBeInTheDocument()
-    expect(screen.getByText('Shopping funnel')).toBeInTheDocument()
+    expect(screen.getByText('Funnel')).toBeInTheDocument()
     expect(screen.getByText('p95 latency')).toBeInTheDocument()
   })
 

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
-import type { Finding, InvestigationLens } from '../../api/types'
-import { formatDelta, formatMetricValue, formatPValue, humanizeSegmentLabel } from '../../lib/format'
+import type { Finding } from '../../api/types'
+import { formatDelta, formatMetricValue, formatPValue, humanizeMetricName, humanizeSegmentLabel } from '../../lib/format'
 import { sessionsUrlForSegment } from '../../lib/sessionLink'
 import { isAndroidLatencySegment } from '../../lib/knownMechanisms'
 
@@ -59,9 +59,12 @@ export function FindingCard({ finding, metricName, experimentId, selected, onSel
   )
 }
 
-export function lensHeadline(lens: InvestigationLens, finding: Finding | undefined): string {
-  if (!finding) return 'No segment passed the significance and minimum-effect-size filters for this lens.'
+/** Stage 16: generalized from a hardcoded per-lens verb map (commerce's
+ * abandonment/conversion/constraint_satisfaction lenses, a concept the
+ * generic investigation API doesn't have) to the metric name itself --
+ * works the same way for any domain's primary metric. */
+export function findingHeadline(metricName: string, finding: Finding | undefined): string {
+  if (!finding) return 'No segment passed the significance and minimum-effect-size filters for this metric.'
   const seg = humanizeSegmentLabel(finding.segment_label)
-  const verb = lens === 'abandonment' ? 'abandonment is concentrated in' : lens === 'conversion' ? 'conversion movement is concentrated in' : 'constraint-satisfaction change is concentrated in'
-  return `v2 ${verb} ${seg}.`
+  return `v2's change in ${humanizeMetricName(metricName)} is concentrated in ${seg}.`
 }

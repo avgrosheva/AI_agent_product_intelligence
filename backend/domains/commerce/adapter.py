@@ -10,6 +10,8 @@ it adds no new commerce logic.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -30,6 +32,52 @@ from backend.domains.commerce.next_actions import NEXT_ACTION_TEMPLATES
 from backend.domains.commerce.segments import DIMENSION_VALUES, PAIRWISE_ALLOWLIST
 from backend.llm.client import SessionContext
 from backend.llm.context_builder import build_all_contexts
+
+
+@lru_cache(maxsize=1)
+def _cached_session_level_base(engine: Engine) -> pd.DataFrame:
+    """Stage 17 task 5/6 perf fix: process-lifetime cache of
+    session_level_base.sql's full result. Before this, every
+    CommerceAdapter.analytics_base_df() call -- so every generic-API
+    request touching commerce (metrics, guardrails, investigation,
+    ai-quality, funnel, sessions, experiments list) -- re-ran this same
+    ~32k-row query and rebuilt the dataframe from scratch, independent
+    of what the request actually needed. Safe for the same reason
+    backend.app.dependencies' pre-existing equivalent cache is safe: this
+    demo/dev dataset has no write path that mutates sessions after
+    datagen's load. Keyed on the engine object (itself a
+    backend.app.domain_registry lru_cache(maxsize=1) singleton) rather
+    than being a bare no-arg cache only so a test that builds its own
+    throwaway engine doesn't share this process-lifetime cache with the
+    app's real one. NEVER used by SupportAdapter, whose ingested_* tables
+    are genuinely live -- caching those the same way would silently hide
+    freshly-ingested data.
+    Callers must treat the returned frame as read-only (filter into a
+    new frame, never assign a column onto it in place) -- every existing
+    call site already does this by construction (boolean-mask filtering
+    reassigns `df`, it never mutates the frame it was given)."""
+    return run_sql_file(engine, "session_level_base.sql")
+
+
+@lru_cache(maxsize=1)
+def _cached_agent_actions_with_experiment(engine: Engine) -> pd.DataFrame:
+    """Stage 17 task 5 perf fix: same rationale/safety contract as
+    _cached_session_level_base -- agent_actions_df() previously re-ran
+    this join on every call (the dominant remaining cost in AI Quality's
+    trajectory reconstruction after the base_df cache above). Carries
+    experiment_id/started_at alongside the 3 columns callers actually
+    want purely so the project/experiment/window filtering
+    agent_actions_df() already did in SQL can happen in pandas instead,
+    against this one cached fetch."""
+    with engine.connect() as conn:
+        return pd.read_sql(
+            text(
+                "SELECT a.session_id, a.sequence_index, a.action_type::text AS action_type, "
+                "s.experiment_id::text AS experiment_id, s.started_at "
+                "FROM agent_actions a JOIN sessions s ON s.session_id = a.session_id"
+            ),
+            conn,
+        )
 
 
 class CommerceAdapter:
@@ -61,7 +109,7 @@ class CommerceAdapter:
         return set(rows)
 
     def analytics_base_df(self, experiment_id: str | None = None, window: AnalysisWindow | None = None) -> pd.DataFrame:
-        df = run_sql_file(self._engine, "session_level_base.sql")
+        df = _cached_session_level_base(self._engine)
         if self._project_id is not None:
             df = df[df["experiment_id"].astype(str).isin(self._owned_experiment_ids())]
         if experiment_id is not None:
@@ -161,28 +209,14 @@ class CommerceAdapter:
         ]
 
     def agent_actions_df(self, experiment_id: str | None = None, window: AnalysisWindow | None = None) -> pd.DataFrame:
-        query = "SELECT a.session_id, a.sequence_index, a.action_type::text AS action_type FROM agent_actions a"
-        params: dict[str, object] = {}
-        needs_join = self._project_id is not None or experiment_id is not None or window is not None
-        if needs_join:
-            query += " JOIN sessions s ON s.session_id = a.session_id"
+        df = _cached_agent_actions_with_experiment(self._engine)
         if self._project_id is not None:
-            query += " JOIN experiments e ON e.experiment_id = s.experiment_id"
-        where = []
-        if self._project_id is not None:
-            where.append("e.project_id = :pid")
-            params["pid"] = self._project_id
+            df = df[df["experiment_id"].isin(self._owned_experiment_ids())]
         if experiment_id is not None:
-            where.append("s.experiment_id::text = :eid")
-            params["eid"] = experiment_id
+            df = df[df["experiment_id"] == experiment_id]
         if window is not None:
-            where.append("s.started_at >= :window_start AND s.started_at <= :window_end")
-            params["window_start"] = window.start
-            params["window_end"] = window.end
-        if where:
-            query += " WHERE " + " AND ".join(where)
-        with self._engine.connect() as conn:
-            return pd.read_sql(text(query), conn, params=params)
+            df = df[(df["started_at"] >= window.start) & (df["started_at"] <= window.end)]
+        return df[["session_id", "sequence_index", "action_type"]]
 
     def failure_attributions_wide_df(self) -> pd.DataFrame:
         mechanisms = list(COMMERCE_MECHANISMS.all_names)

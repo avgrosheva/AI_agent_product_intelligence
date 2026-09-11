@@ -132,6 +132,16 @@ table {
   color: var(--color-accent);
 }
 
+.sidebar-link-disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.sidebar-link-disabled:hover {
+  background: none;
+  color: var(--color-text-muted);
+}
+
 .sidebar-link:focus-visible,
 button:focus-visible,
 a:focus-visible,
@@ -351,4 +361,197 @@ table.data-table tr.clickable:hover {
 
 .table-scroll {
   overflow-x: auto;
+}
+
+/* Stage 15: onboarding wizard + project overview */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field > span {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.field input,
+.field select,
+.field textarea {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.field textarea {
+  resize: vertical;
+  font-family: var(--font-mono);
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.onboarding-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 20px;
+}
+
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  text-align: left;
+  width: 100%;
+}
+
+.step-item:hover {
+  background: var(--color-neutral-weak);
+}
+
+.step-item.active {
+  background: var(--color-accent-weak);
+  color: var(--color-accent);
+}
+
+.step-marker {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: var(--color-neutral-weak);
+  color: var(--color-text-muted);
+}
+
+.step-marker.done {
+  background: var(--color-positive-weak);
+  color: var(--color-positive);
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.status-group h4 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
+.status-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.status-group li {
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--color-neutral-weak);
+  color: var(--color-text-secondary);
+}
+
+.status-group.blocking li { background: var(--color-negative-weak); color: var(--color-negative); }
+.status-group.configured li { background: var(--color-positive-weak); color: var(--color-positive); }
+.status-group.missing li { background: var(--color-warning-weak); color: var(--color-warning); }
+.status-group.optional li { background: var(--color-neutral-weak); color: var(--color-text-secondary); }
+
+.selectable-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  gap: 12px;
+}
+
+.selectable-card:hover {
+  border-color: var(--color-border-strong);
+}
+
+.selectable-card.selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-weak);
+}
+
+.inline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-switcher {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.project-switcher span {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.project-switcher select {
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.filter-input {
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
 }

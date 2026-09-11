@@ -115,6 +115,33 @@ def test_release_history_accumulates_across_calls(api_client, support_project_id
     assert timestamps == sorted(timestamps, reverse=True)
 
 
+def test_release_history_paginates_with_stable_ordering_and_metadata(api_client, support_project_id):
+    """Stage 17 task 7: release-history accumulates one row per evaluation
+    indefinitely (a scheduled monitoring cadence never stops adding rows),
+    so a bare `limit` with no offset/total can only ever show the newest
+    page. This proves the endpoint now reports total/limit/offset and that
+    two consecutive pages (offset=0, offset=1 with limit=1) are disjoint
+    and consistent with the full, unpaginated ordering."""
+    exp_id = _ingest_support_release_fixture(api_client, "history_paging", support_project_id)
+    for _ in range(3):
+        resp = api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?primary_metric=resolution_rate&project_id={support_project_id}")
+        assert resp.status_code == 201
+
+    full = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/release-history?project_id={support_project_id}&limit=100").json()
+    assert full["total"] >= 3
+    assert full["limit"] == 100
+    assert full["offset"] == 0
+
+    page1 = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/release-history?project_id={support_project_id}&limit=1&offset=0").json()
+    page2 = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/release-history?project_id={support_project_id}&limit=1&offset=1").json()
+    assert page1["total"] == full["total"]
+    assert page1["offset"] == 0 and page2["offset"] == 1
+    assert len(page1["evaluations"]) == 1 and len(page2["evaluations"]) == 1
+    assert page1["evaluations"][0]["evaluation_id"] != page2["evaluations"][0]["evaluation_id"]
+    assert page1["evaluations"][0]["evaluation_id"] == full["evaluations"][0]["evaluation_id"]
+    assert page2["evaluations"][0]["evaluation_id"] == full["evaluations"][1]["evaluation_id"]
+
+
 def test_release_status_404_before_any_evaluation(api_client, support_project_id):
     exp_id = _ingest_support_release_fixture(api_client, "no_eval_yet", support_project_id)
     resp = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/release-status?project_id={support_project_id}")

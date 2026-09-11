@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useExperimentDetail, useExperimentFunnel, useExperimentGuardrails, useExperimentMetrics } from '../api/hooks'
+import { useDomainFunnel, useDomainGuardrails, useDomainMetrics } from '../api/hooks'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
 import { FunnelDiagram } from '../components/common/FunnelDiagram'
+import { GuardrailComparisonChart } from '../components/common/GuardrailComparisonChart'
 import { MetricComparisonRow } from '../components/common/MetricComparisonRow'
 import type { SemanticClass } from '../api/types'
+import { useActiveExperiment } from '../state/ActiveExperimentContext'
+import { useActiveProject } from '../state/ActiveProjectContext'
 
 const GROUPS: { key: SemanticClass | 'all'; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -13,20 +16,34 @@ const GROUPS: { key: SemanticClass | 'all'; label: string }[] = [
   { key: 'economic_outcome', label: 'Economics' },
 ]
 
+/** Stage 16: domain-generic (previously called commerce-only,
+ * project-unscoped endpoints). Experiment identity (name/versions) comes
+ * from the already-loaded, project-scoped experiments list
+ * (ActiveExperimentContext) rather than a separate detail call; per-arm
+ * session/user counts come from the metrics table's own rows (every
+ * MetricResult already carries n_sessions_v1/v2 and n_users_v1/v2) since
+ * the generic API has no separate "experiment detail" endpoint --
+ * traffic_split/status are commerce-specific columns with no generic
+ * equivalent and are dropped rather than faked. */
 export function Experiment() {
   const { experimentId } = useParams<{ experimentId: string }>()
   const [group, setGroup] = useState<(typeof GROUPS)[number]['key']>('all')
+  const { activeProject } = useActiveProject()
+  const { experiments, isLoading: expListLoading, error: expListError } = useActiveExperiment()
+  const domain = activeProject?.domain
+  const projectId = activeProject?.project_id
 
-  const { data: detail, isLoading: detailLoading, error: detailError } = useExperimentDetail(experimentId)
-  const { data: metrics, isLoading: metricsLoading, error: metricsError } = useExperimentMetrics(experimentId)
-  const { data: funnel, isLoading: funnelLoading, error: funnelError } = useExperimentFunnel(experimentId)
-  const { data: guardrails, isLoading: guardrailsLoading, error: guardrailsError } = useExperimentGuardrails(experimentId)
+  const detail = experiments.find((e) => e.experiment_id === experimentId) ?? null
+  const { data: metrics, isLoading: metricsLoading, error: metricsError } = useDomainMetrics(domain, projectId, experimentId)
+  const { data: funnel, isLoading: funnelLoading, error: funnelError } = useDomainFunnel(domain, projectId, experimentId)
+  const { data: guardrails, isLoading: guardrailsLoading, error: guardrailsError } = useDomainGuardrails(domain, projectId, experimentId)
 
-  if (detailLoading) return <div className="page"><LoadingState label="Loading experiment…" /></div>
-  if (detailError) return <div className="page"><ErrorState message={(detailError as Error).message} /></div>
+  if (expListLoading) return <div className="page"><LoadingState label="Loading experiment…" /></div>
+  if (expListError) return <div className="page"><ErrorState error={expListError} /></div>
   if (!detail) return <div className="page"><EmptyState>Experiment not found.</EmptyState></div>
 
   const filteredMetrics = metrics?.metrics.filter((m) => group === 'all' || m.semantic_class === group) ?? []
+  const firstMetric = metrics?.metrics[0]
 
   return (
     <div className="page">
@@ -44,23 +61,23 @@ export function Experiment() {
           </div>
           <div>
             <div className="text-muted" style={{ fontSize: 11 }}>Users</div>
-            <div style={{ fontSize: 13.5 }}>v1: {detail.n_users_v1.toLocaleString('en-US')} · v2: {detail.n_users_v2.toLocaleString('en-US')}</div>
+            <div style={{ fontSize: 13.5 }}>
+              {firstMetric ? <>v1: {firstMetric.n_users_v1.toLocaleString('en-US')} · v2: {firstMetric.n_users_v2.toLocaleString('en-US')}</> : '—'}
+            </div>
           </div>
           <div>
             <div className="text-muted" style={{ fontSize: 11 }}>Sessions</div>
-            <div style={{ fontSize: 13.5 }}>v1: {detail.n_sessions_v1.toLocaleString('en-US')} · v2: {detail.n_sessions_v2.toLocaleString('en-US')}</div>
+            <div style={{ fontSize: 13.5 }}>
+              {firstMetric ? <>v1: {firstMetric.n_sessions_v1.toLocaleString('en-US')} · v2: {firstMetric.n_sessions_v2.toLocaleString('en-US')}</> : '—'}
+            </div>
           </div>
           <div>
             <div className="text-muted" style={{ fontSize: 11 }}>Randomization unit</div>
             <div style={{ fontSize: 13.5 }}>User (each user sees exactly one version for the life of the experiment)</div>
           </div>
           <div>
-            <div className="text-muted" style={{ fontSize: 11 }}>Status</div>
-            <div style={{ fontSize: 13.5 }}>{detail.status}</div>
-          </div>
-          <div>
-            <div className="text-muted" style={{ fontSize: 11 }}>Traffic split (v2)</div>
-            <div style={{ fontSize: 13.5 }}>{(detail.traffic_split * 100).toFixed(0)}%</div>
+            <div className="text-muted" style={{ fontSize: 11 }}>Start / end</div>
+            <div style={{ fontSize: 13.5 }}>{detail.start_date ?? '—'} → {detail.end_date ?? '—'}</div>
           </div>
         </div>
       </div>
@@ -78,7 +95,7 @@ export function Experiment() {
           ))}
         </div>
         {metricsLoading && <LoadingState label="Computing metric table…" />}
-        {metricsError && <ErrorState message={(metricsError as Error).message} />}
+        {metricsError && <ErrorState error={metricsError} />}
         {metrics && filteredMetrics.length === 0 && <EmptyState>No metrics in this group.</EmptyState>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {filteredMetrics.map((m) => (
@@ -87,45 +104,30 @@ export function Experiment() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-header">
-          <h2>Shopping funnel</h2>
-          <p>impression → click → add to cart → purchase</p>
+      {(funnelLoading || funnelError || funnel?.applicable) && (
+        <div className="card">
+          <div className="card-header">
+            <h2>Funnel</h2>
+            <p>Ordered stages this domain's sessions pass through.</p>
+          </div>
+          {funnelLoading && <LoadingState />}
+          {funnelError && <ErrorState error={funnelError} />}
+          {funnel?.applicable && <FunnelDiagram series={funnel.series} />}
         </div>
-        {funnelLoading && <LoadingState />}
-        {funnelError && <ErrorState message={(funnelError as Error).message} />}
-        {funnel && <FunnelDiagram funnel={funnel.funnel} />}
-      </div>
+      )}
 
       <div className="card">
         <div className="card-header">
           <h2>Guardrails</h2>
-          <p>Latency, cost, and tool-error checks that can block a ship decision regardless of the north star.</p>
+          <p>Latency, cost, and error checks that can block a ship decision regardless of the north star.</p>
         </div>
         {guardrailsLoading && <LoadingState />}
-        {guardrailsError && <ErrorState message={(guardrailsError as Error).message} />}
+        {guardrailsError && <ErrorState error={guardrailsError} />}
         {guardrails && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {guardrails.checks.map((g) => (
-              <div
-                key={g.name}
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px',
-                  borderRadius: 6, background: g.breached ? 'var(--color-negative-weak)' : 'var(--color-neutral-weak)',
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{g.name.replace(/_/g, ' ')}</div>
-                  <div className="text-muted" style={{ fontSize: 11.5 }}>{g.threshold_description}</div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <span className="mono text-secondary" style={{ fontSize: 12.5 }}>v1: {g.v1_value.toFixed(3)}</span>
-                  <span className="mono text-secondary" style={{ fontSize: 12.5 }}>v2: {g.v2_value.toFixed(3)}</span>
-                  <span className={`chip ${g.breached ? 'chip-negative' : 'chip-neutral'}`}>{g.breached ? 'Breached' : 'OK'}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+          <>
+            <GuardrailComparisonChart checks={guardrails.checks} />
+            {guardrails.checks.length === 0 && <EmptyState>No guardrails configured.</EmptyState>}
+          </>
         )}
       </div>
     </div>

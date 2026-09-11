@@ -103,4 +103,17 @@ def test_self_service_onboarding_to_notified_rollback(api_client, test_identity,
     # dedup_key) -- proves this isn't accidentally deduped across distinct
     # real events, only within one.
     api_client.post(f"/api/v1/domains/support/experiments/{exp_id}/release-evaluations?project_id={project_id}")
-    assert len(api_client.get(f"/api/v1/notifications/deliveries?project_id={project_id}&domain=support").json()["deliveries"]) == 2
+    full = api_client.get(f"/api/v1/notifications/deliveries?project_id={project_id}&domain=support").json()
+    assert len(full["deliveries"]) == 2
+    assert full["total"] == 2 and full["limit"] == 50 and full["offset"] == 0
+
+    # Stage 17 task 7: the delivery log grows one row per attempt
+    # indefinitely -- pagination metadata (total/limit/offset) lets a
+    # caller page through it instead of only ever seeing the newest 50.
+    page1 = api_client.get(f"/api/v1/notifications/deliveries?project_id={project_id}&domain=support&limit=1&offset=0").json()
+    page2 = api_client.get(f"/api/v1/notifications/deliveries?project_id={project_id}&domain=support&limit=1&offset=1").json()
+    assert page1["total"] == 2 and page2["total"] == 2
+    assert len(page1["deliveries"]) == 1 and len(page2["deliveries"]) == 1
+    assert page1["deliveries"][0]["notification_id"] != page2["deliveries"][0]["notification_id"]
+    assert page1["deliveries"][0]["notification_id"] == full["deliveries"][0]["notification_id"]
+    assert page2["deliveries"][0]["notification_id"] == full["deliveries"][1]["notification_id"]

@@ -146,6 +146,40 @@ def read_real_llm_evaluation_summary() -> dict | None:
     return json.loads(REAL_LLM_EVALUATION_SUMMARY_PATH.read_text(encoding="utf-8"))
 
 
+# Stage 16: the CURRENT hybrid multi-label attribution pipeline's own
+# held-out benchmark (scripts/run_hybrid_benchmark.py --subset
+# new_holdout, AI_EVALUATION.md SS5) — a different file, a different
+# shape, and a different (still-current) classifier architecture than
+# REAL_LLM_EVALUATION_SUMMARY_PATH above, which is the DEPRECATED
+# exclusive classifier's own real-LLM evaluation
+# (scripts/run_real_llm_evaluation.py — see that script's own module
+# docstring). Before this was wired in, nothing in the live API read the
+# hybrid benchmark's result at all; the AI Quality screen's classifier-
+# evaluation card only ever showed the deprecated shape/path (or "not
+# evaluated yet" once that path was empty), regardless of a passing
+# current-architecture evaluation sitting on disk.
+CURRENT_HYBRID_EVALUATION_SUMMARY_PATH = Path("reports/final/semantic_holdout_200_summary.json")
+
+# Explains, once, why a deterministic detector scoring 1.0 against this
+# synthetic dataset's ground truth is expected, not a red flag: read
+# AI_EVALUATION.md SS4 before assuming a passing score here says anything
+# about behavior on real production data.
+DETERMINISTIC_DETECTORS_PERFECT_SCORE_NOTE = (
+    "retrieval_failure, poor_ranking, and wrong_tool_selection are pure functions of structured, already-observable "
+    "fields (recommendations.satisfies_constraints, the action-type sequence) that this synthetic dataset's "
+    "generator computed with the identical rule used to label ground truth for these three mechanisms "
+    "(AI_EVALUATION.md SS4) -- a correctly-implemented detector is expected to match ground truth exactly here; "
+    "this is not overfitting or a leaked signal. It validates that the detector correctly implements its "
+    "documented rule against this dataset, not that it will score 1.0 against noisier real production telemetry."
+)
+
+
+def read_current_hybrid_evaluation_summary() -> dict | None:
+    if not CURRENT_HYBRID_EVALUATION_SUMMARY_PATH.exists():
+        return None
+    return json.loads(CURRENT_HYBRID_EVALUATION_SUMMARY_PATH.read_text(encoding="utf-8"))
+
+
 def current_classifier_provenance_fields() -> dict:
     """Shared by both routers that surface classifier provenance
     (sessions.py, ai_quality.py) so the classifier_type/provider/model

@@ -21,18 +21,26 @@ endpoints additionally require the "analyst" role or higher.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from backend.analytics.experiment_results import analyze_all_metrics
+from backend.analytics.cache_utils import investigation_cache, investigation_config_fingerprint, metric_defs_fingerprint, metrics_table_cache
+from backend.analytics.experiment_results import analyze_all_metrics, analyze_metric
 from backend.app.auth_deps import CurrentUser, ProjectContext, get_current_user, get_project_context, require_role
 from backend.app.domain_registry import available_domains, get_adapter, get_engine
+from backend.app.routers.experiments import _status_chip
 from backend.app.investigation_serialization import finding_to_schema
 from backend.app.schemas.common import metric_result_to_schema
 from backend.app.schemas.domain_generic import (
+    GenericAIQualitySummaryResponse,
     GenericExperimentListResponse,
     GenericExperimentSummary,
     GenericFailureAttributionSchema,
+    GenericFailureMechanismPrevalenceItem,
+    GenericFunnelResponse,
+    GenericFunnelSeries,
+    GenericFunnelStagePoint,
     GenericGuardrailCheckSchema,
     GenericGuardrailResponse,
     GenericInvestigationResponse,
@@ -41,6 +49,8 @@ from backend.app.schemas.domain_generic import (
     GenericSessionListResponse,
     GenericSessionSummary,
     GenericToolCallSchema,
+    GenericToolUseQuality,
+    GenericTrajectoryPatternItem,
     MechanismListResponse,
     MechanismSchema,
     DataQualityReportResponse,
@@ -49,16 +59,24 @@ from backend.app.schemas.domain_generic import (
     ReleaseEvaluationSchema,
     ReleaseEvidenceResponse,
     ReleaseHistoryResponse,
+    SegmentDimensionsResponse,
     SessionEvidenceSchema,
 )
 from backend.app.schemas.investigation import ExploredSegmentSummary, RecommendationSchema
-from backend.app.schemas.project_config import OnboardingStatusResponse, ProjectConfigRequest, ProjectConfigSchema
+from backend.app.schemas.project_config import (
+    AvailableGuardrailSchema,
+    AvailableMetricSchema,
+    OnboardingStatusResponse,
+    ProjectConfigRequest,
+    ProjectConfigSchema,
+)
 from backend.app.schemas.release_summary import ReleaseSummaryResponse
 from backend.core.adapter import DomainAdapter
 from backend.core.config import load_metric_config_from_dict
 from backend.core.guardrails import evaluate_guardrails
 from backend.core.investigation_config import investigation_config_from_adapter
 from backend.investigation.pipeline import run_investigation
+from backend.investigation.trajectory_attribution import canonicalize_patterns, reconstruct_trajectories
 from backend.monitoring.service import list_monitoring_configs
 from backend.notifications.service import list_channels as list_notification_channels
 from backend.project_config.service import existing_context_keys, get_project_config, upsert_project_config, validate_project_config
@@ -66,7 +84,7 @@ from backend.quality.service import compute_data_quality_report
 from backend.release.evidence import build_release_evidence
 from backend.release.service import evaluate_and_persist_release, get_latest_release_status, get_release_evaluation_by_id, list_release_history
 from backend.release.summary import build_release_summary
-from backend.review.service import get_reviews_for_session
+from backend.review.service import count_reviews_by_mechanism, get_reviews_for_session, list_reviews_for_sessions
 
 router = APIRouter(prefix="/api/v1/domains", tags=["generic-domain-api"])
 
@@ -90,6 +108,73 @@ def _validate_primary_metric(adapter: DomainAdapter, primary_metric: str) -> Non
         )
 
 
+# Stage 17 task 5/6 perf fix: analyze_all_metrics runs a bootstrap CI per
+# metric -- ~30 metrics on commerce measured at ~23s total on the demo
+# dataset, one of the slowest computations in the main flow (GET
+# .../metrics, which Experiment and Investigation both depend on -- and,
+# via backend.release.service.evaluate_release, so does POST
+# .../release-evaluations and scheduled monitoring). Cached per (domain,
+# project, experiment) via backend.analytics.cache_utils.metrics_table_cache
+# -- a bounded LRU shared with evaluate_release's own use of the same
+# cache (see backend/release/service.py), so whichever of "view the
+# metrics table" / "run an investigation" / "evaluate a release" happens
+# first warms it for the others, instead of each independently paying for
+# the same computation. Keyed additionally on a cheap fingerprint of the
+# EFFECTIVE metric definitions (name/implemented/is_inferential per
+# metric) so a project that edits its own metrics config
+# (backend.project_config) invalidates itself the moment that config
+# actually changes, without this module needing to know when that
+# happened. ALSO keyed on len(base_df): unlike commerce (static dataset,
+# safe to cache indefinitely -- see
+# CommerceAdapter._cached_session_level_base), the support domain's
+# ingested_* tables are genuinely live, so a metric-defs fingerprint alone
+# would silently serve a stale metrics table forever once new sessions
+# land after the first call for a given experiment. Row count is a cheap,
+# good-enough staleness signal for an append-only ingestion table -- it
+# does not catch an in-place mutation of existing rows, but nothing
+# ingests that way today.
+def _cached_analyze_all_metrics(domain: str, project_id: str, experiment_id: str, base_df, metric_defs, metric_value_columns):
+    # window_key is always None here (this endpoint never applies a
+    # window) -- kept as an explicit slot, in the same position
+    # evaluate_release's key uses, purely so an unwindowed call from
+    # either path produces the identical key and actually shares the
+    # cache entry, instead of two structurally different tuples that
+    # happen to mean the same thing.
+    key = (domain, project_id, experiment_id, metric_defs_fingerprint(metric_defs), None, len(base_df))
+    return metrics_table_cache.get_or_compute(key, lambda: analyze_all_metrics(base_df, metric_defs, metric_value_columns=metric_value_columns))
+
+
+# Stage 17 task 5/6 perf fix: run_investigation's segment scan calls
+# analyze_metric ~58 times on commerce (57 registered segments + the
+# overall comparison), and EVERY call that clears the sparse-data gate
+# runs a 10,000-resample cluster bootstrap CI
+# (backend.analytics.stats.bootstrap.cluster_bootstrap_ci) -- that cost is
+# what made both GET .../investigation (~21s) and, worse, POST
+# .../release-evaluations (~64s, since evaluate_release also separately
+# calls analyze_all_metrics -- see backend/release/service.py) among the
+# slowest requests in the app, unmoved by the base_df/agent_actions_df
+# caches above since those only cut the SQL fetch, not this in-process
+# statistical compute. The bootstrap is already fully vectorized and
+# deterministic (fixed seed); there is no cheaper way to compute the SAME
+# confidence intervals, so rather than touch STATISTICS.md's bootstrap
+# procedure this caches the whole InvestigationResult via
+# backend.analytics.cache_utils.investigation_cache -- shared with
+# evaluate_release the same way the metrics cache above is, same key
+# shape (domain/project/experiment/primary_metric, fingerprinted config,
+# row counts as a live-data staleness signal). A cache hit returns an
+# identical result object.
+def _cached_run_investigation(domain, project_id, experiment_id, primary_metric, base_df, agent_actions_df, failure_attributions_wide_df, config):
+    # window_key is always None here (this endpoint never applies a
+    # window) -- see the matching comment in _cached_analyze_all_metrics.
+    key = (
+        domain, project_id, experiment_id, primary_metric, investigation_config_fingerprint(config), None,
+        len(base_df), len(agent_actions_df), len(failure_attributions_wide_df),
+    )
+    return investigation_cache.get_or_compute(
+        key, lambda: run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, config, primary_metric_name=primary_metric)
+    )
+
+
 @router.get("", response_model=list[str])
 def list_domains(user: CurrentUser = Depends(get_current_user)) -> list[str]:
     return available_domains()
@@ -97,14 +182,38 @@ def list_domains(user: CurrentUser = Depends(get_current_user)) -> list[str]:
 
 @router.get("/{domain}/experiments", response_model=GenericExperimentListResponse)
 def list_domain_experiments(domain: str, ctx: ProjectContext = Depends(get_project_context)) -> GenericExperimentListResponse:
+    """Stage 16: also carries each experiment's north-star metric and
+    status chip -- the same computation backend.app.routers.experiments.
+    list_experiments already performs for the legacy commerce-only route
+    (same analyze_metric/evaluate_guardrails/_status_chip, reused not
+    reimplemented), generalized to any domain's own configured primary
+    metric instead of a hardcoded "conversion_rate". This is what the
+    Overview screen's portfolio cards render for a project of any domain."""
     adapter = get_adapter(domain, project_id=ctx.project.project_id)
-    experiments = [
-        GenericExperimentSummary(
-            experiment_id=e.experiment_id, name=e.name, control_version=e.control_version,
-            treatment_version=e.treatment_version, start_date=e.start_date, end_date=e.end_date,
+    config = get_project_config(get_engine(), ctx.project.project_id)
+    primary_metric = config.primary_metric if config else None
+    metric_def = next((m for m in adapter.metric_definitions() if m.name == primary_metric), None) if primary_metric else None
+
+    experiments = []
+    for e in adapter.list_experiments():
+        n_sessions = n_users = None
+        north_star_schema = None
+        status_chip: str = "not_yet_investigated"
+        if metric_def is not None:
+            base_df = adapter.analytics_base_df(experiment_id=e.experiment_id)
+            north_star = analyze_metric(base_df, metric_def, metric_value_columns=adapter.metric_value_columns())
+            guardrail_report = evaluate_guardrails(base_df, adapter.guardrails())
+            n_sessions = north_star.n_sessions_v1 + north_star.n_sessions_v2
+            n_users = north_star.n_users_v1 + north_star.n_users_v2
+            north_star_schema = metric_result_to_schema(north_star)
+            status_chip = _status_chip(north_star, guardrail_report.any_breach, direction=metric_def.direction)
+        experiments.append(
+            GenericExperimentSummary(
+                experiment_id=e.experiment_id, name=e.name, control_version=e.control_version,
+                treatment_version=e.treatment_version, start_date=e.start_date, end_date=e.end_date,
+                n_sessions=n_sessions, n_users=n_users, north_star_metric=north_star_schema, status_chip=status_chip,
+            )
         )
-        for e in adapter.list_experiments()
-    ]
     return GenericExperimentListResponse(domain=domain, experiments=experiments)
 
 
@@ -113,7 +222,7 @@ def get_domain_metrics(domain: str, experiment_id: str, ctx: ProjectContext = De
     adapter = get_adapter(domain, project_id=ctx.project.project_id)
     _experiment_or_404(adapter, experiment_id)
     base_df = adapter.analytics_base_df(experiment_id=experiment_id)
-    results = analyze_all_metrics(base_df, adapter.metric_definitions(), metric_value_columns=adapter.metric_value_columns())
+    results = _cached_analyze_all_metrics(domain, ctx.project.project_id, experiment_id, base_df, adapter.metric_definitions(), adapter.metric_value_columns())
     return GenericMetricTableResponse(domain=domain, experiment_id=experiment_id, metrics=[metric_result_to_schema(r) for r in results])
 
 
@@ -135,6 +244,44 @@ def get_domain_guardrails(domain: str, experiment_id: str, ctx: ProjectContext =
     return GenericGuardrailResponse(domain=domain, experiment_id=experiment_id, checks=checks, any_breach=report.any_breach, any_warning_breach=report.any_warning_breach)
 
 
+# Stage 16: the funnel concept (impression -> click -> cart -> purchase)
+# is inherently commerce-shaped, not a generic session-analytics concept.
+# These are the funnel-stage columns session_level_base.sql produces for
+# commerce; a domain whose analytics_base_df carries none of them (e.g.
+# support) is reported as not applicable rather than guessing a funnel
+# that doesn't exist for it. This mirrors list_domain_sessions' own
+# column-presence check just below (outcome vs outcome_label) -- this
+# file stays free of any import from backend.domains.commerce/support,
+# it only ever inspects column names already present on the adapter's df.
+_FUNNEL_STAGE_COLUMNS = [("impression", "had_impression"), ("click", "had_click"), ("cart", "had_cart"), ("purchase", "had_purchase")]
+
+
+@router.get("/{domain}/experiments/{experiment_id}/funnel", response_model=GenericFunnelResponse)
+def get_domain_funnel(domain: str, experiment_id: str, ctx: ProjectContext = Depends(get_project_context)) -> GenericFunnelResponse:
+    """Reuses the exact computation backend.app.routers.experiments.
+    get_experiment_funnel already performs for the legacy commerce-only
+    route, generalized to be project/domain-scoped via the adapter's own
+    analytics_base_df instead of the unscoped get_base_df."""
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
+    _experiment_or_404(adapter, experiment_id)
+    base_df = adapter.analytics_base_df(experiment_id=experiment_id)
+
+    stage_cols = [(label, col) for label, col in _FUNNEL_STAGE_COLUMNS if col in base_df.columns]
+    if not stage_cols or "agent_version" not in base_df.columns:
+        return GenericFunnelResponse(domain=domain, experiment_id=experiment_id, applicable=False, series=[])
+
+    series = []
+    for version, group in base_df.groupby("agent_version"):
+        stages = []
+        prev_n: int | None = None
+        for label, col in stage_cols:
+            n = int(group[col].sum())
+            stages.append(GenericFunnelStagePoint(stage=label, n_sessions=n, conversion_from_previous=(n / prev_n) if prev_n else None))
+            prev_n = n
+        series.append(GenericFunnelSeries(agent_version=version, n_sessions=len(group), stages=stages))
+    return GenericFunnelResponse(domain=domain, experiment_id=experiment_id, applicable=True, series=series)
+
+
 @router.get("/{domain}/experiments/{experiment_id}/investigation", response_model=GenericInvestigationResponse)
 def get_domain_investigation(
     domain: str,
@@ -150,7 +297,9 @@ def get_domain_investigation(
     base_df = adapter.analytics_base_df(experiment_id=experiment_id)
     agent_actions_df = adapter.agent_actions_df(experiment_id=experiment_id)
     failure_attributions_wide_df = adapter.failure_attributions_wide_df()
-    result = run_investigation(base_df, agent_actions_df, failure_attributions_wide_df, config, primary_metric_name=primary_metric)
+    result = _cached_run_investigation(
+        domain, ctx.project.project_id, experiment_id, primary_metric, base_df, agent_actions_df, failure_attributions_wide_df, config
+    )
 
     scan_by_label = {row.segment.label: row for row in result.scan_rows}
     top_labels = {f.segment_label for f in result.findings}
@@ -197,11 +346,130 @@ def get_domain_mechanisms(domain: str, ctx: ProjectContext = Depends(get_project
     return MechanismListResponse(domain=domain, mechanisms=mechanisms)
 
 
+@router.get("/{domain}/segment-dimensions", response_model=SegmentDimensionsResponse)
+def get_domain_segment_dimensions(domain: str, ctx: ProjectContext = Depends(get_project_context)) -> SegmentDimensionsResponse:
+    """Stage 17 task 3: lets the frontend build a sessions-filter UI (and
+    any other segment-dimension picker) from this project's own
+    dimensions/values, never a hardcoded commerce list. A project's own
+    segment_dimensions override (backend.project_config.overrides) is
+    already what adapter.segment_dimensions() returns when one exists."""
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
+    return SegmentDimensionsResponse(domain=domain, dimensions=adapter.segment_dimensions())
+
+
+@router.get("/{domain}/experiments/{experiment_id}/ai-quality", response_model=GenericAIQualitySummaryResponse)
+def get_domain_ai_quality(domain: str, experiment_id: str, ctx: ProjectContext = Depends(get_project_context)) -> GenericAIQualitySummaryResponse:
+    """Reuses the exact computation backend.app.routers.ai_quality.
+    get_ai_quality_summary already performs, generalized via the adapter:
+    project-scoped failure attributions from list_reviewable_attributions
+    (empty for a domain with no attribution storage, e.g. support -- the
+    same "empty is valid" contract as get_domain_mechanisms), the
+    adapter's own trajectory_config for outcome/negative-outcome/action
+    vocabulary instead of commerce's literals, and column-presence checks
+    for tool-use fields whose exact names differ per domain (commerce's
+    *_session suffix vs support's bare names) -- nulling out a field
+    rather than guessing when a domain's data doesn't carry it."""
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
+    _experiment_or_404(adapter, experiment_id)
+    base_df = adapter.analytics_base_df(experiment_id=experiment_id)
+    v1_mask = base_df["agent_version"] == "v1"
+    v2_mask = base_df["agent_version"] == "v2"
+    n_v1, n_v2 = int(v1_mask.sum()), int(v2_mask.sum())
+
+    counts: dict[str, dict[str, int]] = {}
+    sources: dict[str, str] = {}
+    for a in adapter.list_reviewable_attributions(experiment_id=experiment_id):
+        by_version = counts.setdefault(a.failure_mode, {})
+        by_version[a.agent_version] = by_version.get(a.agent_version, 0) + 1
+        sources[a.failure_mode] = a.detector_source
+    review_counts = count_reviews_by_mechanism(get_engine(), domain, set(base_df["session_id"].astype(str)), project_id=ctx.project.project_id)
+    prevalence = [
+        GenericFailureMechanismPrevalenceItem(
+            failure_mode=m.name,
+            detector_source=sources.get(m.name, m.source),
+            count_v1=counts.get(m.name, {}).get("v1", 0),
+            count_v2=counts.get(m.name, {}).get("v2", 0),
+            rate_v1=(counts.get(m.name, {}).get("v1", 0) / n_v1) if n_v1 else 0.0,
+            rate_v2=(counts.get(m.name, {}).get("v2", 0) / n_v2) if n_v2 else 0.0,
+            reviewed_count=review_counts.get(m.name, {}).get("reviewed", 0),
+            confirmed_count=review_counts.get(m.name, {}).get("confirmed", 0),
+            rejected_count=review_counts.get(m.name, {}).get("rejected", 0),
+        )
+        for m in adapter.mechanisms().mechanisms
+    ]
+
+    def _mean(col_candidates: list[str], mask) -> float | None:
+        for col in col_candidates:
+            if col in base_df.columns:
+                values = base_df.loc[mask, col].dropna()
+                return float(values.mean()) if len(values) else None
+        return None
+
+    tool_use = GenericToolUseQuality(
+        tool_calls_per_session_v1=_mean(["n_tool_calls"], v1_mask),
+        tool_calls_per_session_v2=_mean(["n_tool_calls"], v2_mask),
+        tool_success_rate_v1=_mean(["tool_success_rate_session", "tool_success_rate"], v1_mask),
+        tool_success_rate_v2=_mean(["tool_success_rate_session", "tool_success_rate"], v2_mask),
+        tool_error_rate_v1=_mean(["tool_error_rate_session"], v1_mask),
+        tool_error_rate_v2=_mean(["tool_error_rate_session"], v2_mask),
+    )
+
+    traj_config = adapter.trajectory_config()
+    trajectories = reconstruct_trajectories(adapter.agent_actions_df(experiment_id=experiment_id))
+    merged = base_df.merge(trajectories, on="session_id", how="left").dropna(subset=["action_sequence"])
+    traj_items: list[GenericTrajectoryPatternItem] = []
+    if not merged.empty and traj_config.outcome_column in merged.columns:
+        canon = canonicalize_patterns(
+            merged, clarify_action=traj_config.clarify_action, repeat_action=traj_config.repeat_action,
+            terminal_negative_action=traj_config.terminal_negative_action,
+        )
+        for pattern, group in canon.groupby("pattern"):
+            v1 = group[group.agent_version == "v1"]
+            v2 = group[group.agent_version == "v2"]
+            if len(v1) + len(v2) < 5:
+                continue
+            traj_items.append(
+                GenericTrajectoryPatternItem(
+                    pattern=pattern, n_sessions_v1=len(v1), n_sessions_v2=len(v2),
+                    negative_outcome_rate_v1=float((v1[traj_config.outcome_column] == traj_config.negative_outcome_value).mean()) if len(v1) else 0.0,
+                    negative_outcome_rate_v2=float((v2[traj_config.outcome_column] == traj_config.negative_outcome_value).mean()) if len(v2) else 0.0,
+                )
+            )
+        traj_items.sort(key=lambda t: t.n_sessions_v1 + t.n_sessions_v2, reverse=True)
+
+    return GenericAIQualitySummaryResponse(
+        domain=domain, experiment_id=experiment_id,
+        failure_mechanism_prevalence=prevalence, tool_use_quality=tool_use, trajectory_patterns=traj_items,
+    )
+
+
+def _session_review_status(mechanisms: list[str], reviews_for_session: dict[str, object]) -> str:
+    """One aggregate status per session for a filter/column that has to
+    show one value per row, even though review is stored per (session,
+    failure_mode). "unreviewed" when nothing detected has been reviewed
+    at all (including sessions with nothing detected to review); "mixed"
+    when reviewed mechanisms disagree."""
+    decisions = {reviews_for_session[m].decision for m in mechanisms if m in reviews_for_session}  # type: ignore[attr-defined]
+    if not decisions:
+        return "unreviewed"
+    if decisions == {"confirmed"}:
+        return "confirmed"
+    if decisions == {"rejected"}:
+        return "rejected"
+    return "mixed"
+
+
 @router.get("/{domain}/sessions", response_model=GenericSessionListResponse)
 def list_domain_sessions(
     domain: str,
+    request: Request,
     experiment_id: str | None = None,
     agent_version: str | None = None,
+    outcome: str | None = None,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
+    detected_mechanism: str | None = Query(default=None, description="One of this domain's registered mechanism names; empty for a domain with no attribution storage."),
+    review_status: str | None = Query(default=None, description="unreviewed | confirmed | rejected | mixed"),
     limit: int = Query(default=50, le=500),
     offset: int = Query(default=0, ge=0),
     ctx: ProjectContext = Depends(get_project_context),
@@ -211,17 +479,62 @@ def list_domain_sessions(
     if agent_version is not None:
         df = df[df["agent_version"] == agent_version]
 
+    outcome_col = "outcome" if "outcome" in df.columns else ("outcome_label" if "outcome_label" in df.columns else None)
+    if outcome is not None and outcome_col is not None:
+        df = df[df[outcome_col] == outcome]
+
+    if "started_at" in df.columns:
+        if started_after is not None:
+            df = df[df["started_at"] >= started_after]
+        if started_before is not None:
+            df = df[df["started_at"] <= started_before]
+
+    # Stage 16: filter by this domain's own registered pre-treatment
+    # segment dimensions (backend.core.adapter.DomainAdapter.
+    # segment_dimensions) -- the exact same dimension vocabulary
+    # Investigation findings already use, so a "View sessions" link built
+    # from a Finding's segment filters correctly for any domain, not just
+    # commerce's hardcoded columns. Any other query param is ignored here
+    # (project_id/experiment_id/agent_version/limit/offset are handled
+    # above, via their own typed parameters).
+    for key in adapter.segment_dimensions():
+        value = request.query_params.get(key)
+        if value is not None and key in df.columns:
+            df = df[df[key].astype(str) == value]
+
+    # Stage 17 task 3: detected-mechanism and review-status filters, and
+    # the per-row detected_mechanisms/review_status fields, all built
+    # from adapter.list_reviewable_attributions() -- empty for a domain
+    # with no attribution storage (support), same "empty is valid"
+    # contract as get_domain_mechanisms.
+    mechanisms_by_session: dict[str, list[str]] = {}
+    for a in adapter.list_reviewable_attributions(experiment_id=experiment_id):
+        mechanisms_by_session.setdefault(a.session_id, []).append(a.failure_mode)
+    reviews_by_session = list_reviews_for_sessions(get_engine(), domain, set(mechanisms_by_session.keys()), project_id=ctx.project.project_id)
+
+    if detected_mechanism is not None:
+        matching_ids = {sid for sid, modes in mechanisms_by_session.items() if detected_mechanism in modes}
+        df = df[df["session_id"].astype(str).isin(matching_ids)]
+    if review_status is not None:
+        matching_ids = {
+            sid
+            for sid in df["session_id"].astype(str)
+            if _session_review_status(mechanisms_by_session.get(sid, []), reviews_by_session.get(sid, {})) == review_status
+        }
+        df = df[df["session_id"].astype(str).isin(matching_ids)]
+
     total = len(df)
     sort_col = "started_at" if "started_at" in df.columns else "session_id"
     page = df.sort_values(sort_col, ascending=False).iloc[offset : offset + limit]
 
-    outcome_col = "outcome" if "outcome" in df.columns else ("outcome_label" if "outcome_label" in df.columns else None)
     items = [
         GenericSessionSummary(
             session_id=str(row.session_id),
             agent_version=row.agent_version,
             outcome=(getattr(row, outcome_col) if outcome_col else None),
             started_at=getattr(row, "started_at", None),
+            detected_mechanisms=mechanisms_by_session.get(str(row.session_id), []),
+            review_status=_session_review_status(mechanisms_by_session.get(str(row.session_id), []), reviews_by_session.get(str(row.session_id), {})),
         )
         for row in page.itertuples()
     ]
@@ -299,10 +612,17 @@ def get_release_status(domain: str, experiment_id: str, ctx: ProjectContext = De
 
 @router.get("/{domain}/experiments/{experiment_id}/release-history", response_model=ReleaseHistoryResponse)
 def get_release_history(
-    domain: str, experiment_id: str, limit: int = Query(default=20, le=100), ctx: ProjectContext = Depends(get_project_context)
+    domain: str,
+    experiment_id: str,
+    limit: int = Query(default=20, le=100),
+    offset: int = Query(default=0, ge=0),
+    ctx: ProjectContext = Depends(get_project_context),
 ) -> ReleaseHistoryResponse:
-    results = list_release_history(get_engine(), domain, experiment_id, project_id=ctx.project.project_id, limit=limit)
-    return ReleaseHistoryResponse(domain=domain, experiment_id=experiment_id, evaluations=[ReleaseEvaluationSchema(**r.__dict__) for r in results])
+    results, total = list_release_history(get_engine(), domain, experiment_id, project_id=ctx.project.project_id, limit=limit, offset=offset)
+    return ReleaseHistoryResponse(
+        domain=domain, experiment_id=experiment_id, evaluations=[ReleaseEvaluationSchema(**r.__dict__) for r in results],
+        total=total, limit=limit, offset=offset,
+    )
 
 
 @router.get("/{domain}/experiments/{experiment_id}/release-evaluations/{evaluation_id}/evidence", response_model=ReleaseEvidenceResponse)
@@ -369,22 +689,69 @@ def get_data_quality_report(domain: str, ctx: ProjectContext = Depends(get_proje
     )
 
 
-def _config_schema(project_id: str, config) -> ProjectConfigSchema:
+def _available_metrics(adapter: DomainAdapter) -> list[AvailableMetricSchema]:
+    # Stage 17 task 10: previously defaulted an unset label to the raw
+    # metric name (`m.label or m.name`) -- MetricDefinition.label's own
+    # docstring says "" means "use name", but filling that in HERE meant
+    # every consumer always received a non-empty, non-humanized string,
+    # silently defeating their own `label || humanizeMetricName(name)`
+    # fallback (Investigation.tsx already had exactly that fallback
+    # written, and it never fired because of this). Sending the field
+    # through as-is lets each consumer decide how to render "no custom
+    # label set" -- which for a human-facing UI is humanization, not the
+    # raw snake_case name.
+    value_columns = adapter.metric_value_columns()
+    return [
+        AvailableMetricSchema(
+            name=m.name, label=m.label, metric_type=m.metric_type, direction=m.direction,
+            semantic_class=m.semantic_class, is_inferential=m.is_inferential, is_descriptive=m.is_descriptive,
+            value_column=value_columns[m.name][0] if m.name in value_columns else None,
+        )
+        for m in adapter.metric_definitions()
+        if m.implemented
+    ]
+
+
+def _available_guardrails(adapter: DomainAdapter) -> list[AvailableGuardrailSchema]:
+    return [
+        AvailableGuardrailSchema(
+            name=g.name, metric=g.metric, column=g.column, aggregation=g.aggregation, kind=g.kind,
+            direction=g.direction, threshold=g.threshold, severity=g.severity, enabled=g.enabled,
+        )
+        for g in adapter.guardrails()
+    ]
+
+
+def _config_schema(project_id: str, config, adapter: DomainAdapter, engine, domain: str) -> ProjectConfigSchema:
+    available_metrics = _available_metrics(adapter)
+    available_guardrails = _available_guardrails(adapter)
+    available_context_fields = sorted(existing_context_keys(engine, project_id, domain))
     if config is None:
         return ProjectConfigSchema(
             project_id=project_id, primary_metric=None, metrics=None, guardrails=None, segment_dimensions=None,
             economics=None, monitoring_cadence_seconds=None, enabled_notification_rules=[], created_at=None, updated_at=None,
+            available_metrics=available_metrics, available_guardrails=available_guardrails,
+            available_context_fields=available_context_fields,
         )
-    return ProjectConfigSchema(**config.__dict__)
+    return ProjectConfigSchema(
+        **config.__dict__, available_metrics=available_metrics, available_guardrails=available_guardrails,
+        available_context_fields=available_context_fields,
+    )
 
 
 @router.get("/{domain}/config", response_model=ProjectConfigSchema)
 def get_config(domain: str, ctx: ProjectContext = Depends(get_project_context)) -> ProjectConfigSchema:
     """Stage 12 task 4: this project's persisted configuration. A project
     that has never saved one gets an all-null shell back, not a 404 —
-    the domain's static defaults are already in effect either way."""
-    config = get_project_config(get_engine(), ctx.project.project_id)
-    return _config_schema(ctx.project.project_id, config)
+    the domain's static defaults are already in effect either way.
+
+    Stage 15 tasks 3-5: also returns the domain's currently-available
+    metrics/guardrails/context fields, so the onboarding UI can offer
+    dropdowns and checklists instead of asking a PM to write JSON."""
+    engine = get_engine()
+    adapter = get_adapter(domain, project_id=ctx.project.project_id)
+    config = get_project_config(engine, ctx.project.project_id)
+    return _config_schema(ctx.project.project_id, config, adapter, engine, domain)
 
 
 @router.put("/{domain}/config", response_model=ProjectConfigSchema)
@@ -424,7 +791,7 @@ def put_config(domain: str, request: ProjectConfigRequest, ctx: ProjectContext =
         guardrails_json=request.guardrails, segment_dimensions_json=request.segment_dimensions, economics_json=request.economics,
         monitoring_cadence_seconds=request.monitoring_cadence_seconds, enabled_notification_rules=request.enabled_notification_rules,
     )
-    return _config_schema(ctx.project.project_id, result)
+    return _config_schema(ctx.project.project_id, result, adapter, engine, domain)
 
 
 @router.get("/{domain}/onboarding-status", response_model=OnboardingStatusResponse)

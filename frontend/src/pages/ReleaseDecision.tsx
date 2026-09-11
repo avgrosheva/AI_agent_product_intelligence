@@ -1,8 +1,13 @@
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useReleaseSummary } from '../api/hooks'
+import { useCreateReleaseEvaluation, useReleaseHistory, useReleaseSummary } from '../api/hooks'
+import { ApiError } from '../api/client'
 import type { DataQualityStatus, ReleaseVerdict } from '../api/types'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
+import { ReleaseTrendChart } from '../components/common/ReleaseTrendChart'
+import { SegmentEffectChart } from '../components/common/SegmentEffectChart'
 import { formatDateTime, formatPValue, humanizeMetricName, humanizeSegmentLabel } from '../lib/format'
+import { useActiveProject } from '../state/ActiveProjectContext'
 
 const VERDICT_CLASS: Record<ReleaseVerdict, string> = {
   SHIP: 'chip-positive',
@@ -22,36 +27,105 @@ function formatSignedPct(value: number | null): string {
   return `${sign}${(value * 100).toFixed(1)}pp`
 }
 
+function EvaluateNowButton({ domain, projectId, experimentId }: { domain: string; projectId: string; experimentId: string }) {
+  const createEvaluation = useCreateReleaseEvaluation(domain, projectId)
+  const [errorText, setErrorText] = useState<string | null>(null)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+      <button
+        type="button"
+        className="btn btn-primary"
+        disabled={createEvaluation.isPending}
+        onClick={() => {
+          setErrorText(null)
+          createEvaluation.mutate(
+            { experimentId },
+            { onError: (err) => setErrorText(err instanceof ApiError ? err.detail : 'Evaluation failed.') },
+          )
+        }}
+      >
+        {createEvaluation.isPending ? 'Evaluating…' : 'Evaluate now'}
+      </button>
+      {errorText && <span className="text-muted" style={{ fontSize: 11.5, maxWidth: 260, textAlign: 'right' }}>{errorText}</span>}
+    </div>
+  )
+}
+
 /** Decision-first release screen (Stage 14): the verdict and why it was
  * reached come before anything else — everything on this page is a
- * direct read of GET .../release-summary, never recomputed here. */
+ * direct read of GET .../release-summary, never recomputed here.
+ *
+ * Stage 16 task 5: a PM reaches this page from the Experiment/Overview
+ * nav (AppLayout's "Release Decision" link, already project/domain-aware)
+ * with no URL to type, and "Evaluate now" runs a fresh release evaluation
+ * in place -- previously the only way to populate this screen for an
+ * experiment with no prior evaluation was to call the release-evaluations
+ * POST endpoint directly, outside the UI entirely. */
 export function ReleaseDecision() {
   const { experimentId } = useParams<{ experimentId: string }>()
-  const { data, isLoading, error } = useReleaseSummary(experimentId)
+  const { activeProject } = useActiveProject()
+  const domain = activeProject?.domain
+  const projectId = activeProject?.project_id
+  const { data, isLoading, error } = useReleaseSummary(domain, projectId, experimentId)
+  const { data: history } = useReleaseHistory(domain, projectId, experimentId)
+
+  // Stage 17 task 10: a 404 here means "this experiment has no release
+  // evaluation yet" -- an expected, common state (a brand-new experiment
+  // has never had "Evaluate now" clicked), not a request failure. Without
+  // this check it fell into the generic ErrorState branch below and
+  // showed a raw "Not found" alert instead of the empty state's
+  // "Evaluate now" button -- the one and only way to get out of that
+  // state from this screen.
+  const isNotYetEvaluated = error instanceof ApiError && error.status === 404
 
   if (isLoading) return <div className="page"><LoadingState label="Loading release decision…" /></div>
-  if (error) return <div className="page"><ErrorState message={(error as Error).message} /></div>
-  if (!data) return <div className="page"><EmptyState>No release evaluation has been run yet for this experiment.</EmptyState></div>
+  if (error && !isNotYetEvaluated) return <div className="page"><ErrorState error={error} /></div>
+  if (!data) {
+    return (
+      <div className="page">
+        <EmptyState>No release evaluation has been run yet for this experiment.</EmptyState>
+        {domain && projectId && experimentId && (
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <EvaluateNowButton domain={domain} projectId={projectId} experimentId={experimentId} />
+          </div>
+        )}
+      </div>
+    )
+  }
 
   const { decision, explanation_text, evidence_hierarchy, findings, representative_sessions, economics, data_quality_status, monitoring_window } = data
 
   return (
     <div className="page">
       {/* -- verdict, prominently -- */}
-      <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <span className={`chip ${VERDICT_CLASS[decision.verdict]}`} style={{ fontSize: 20, padding: '10px 20px' }}>
-          {decision.verdict}
-        </span>
-        <div>
-          <h1 style={{ marginBottom: 2 }}>{explanation_text}</h1>
-          <p className="text-secondary" style={{ margin: 0 }}>
-            {decision.raw_verdict !== decision.verdict && (
-              <span>Underlying verdict: {decision.raw_verdict} (withheld due to data quality) · </span>
-            )}
-            Confidence: {decision.confidence.replace('_', ' ')}
-          </p>
+      <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span className={`chip ${VERDICT_CLASS[decision.verdict]}`} style={{ fontSize: 20, padding: '10px 20px' }}>
+            {decision.verdict}
+          </span>
+          <div>
+            <h1 style={{ marginBottom: 2 }}>{explanation_text}</h1>
+            <p className="text-secondary" style={{ margin: 0 }}>
+              {decision.raw_verdict !== decision.verdict && (
+                <span>Underlying verdict: {decision.raw_verdict} (withheld due to data quality) · </span>
+              )}
+              Confidence: {decision.confidence.replace('_', ' ')}
+            </p>
+          </div>
         </div>
+        {domain && projectId && experimentId && <EvaluateNowButton domain={domain} projectId={projectId} experimentId={experimentId} />}
       </div>
+
+      {history && history.evaluations.length > 1 && (
+        <div className="card">
+          <div className="card-header">
+            <h2>Verdict history</h2>
+            <p>Is today's regression new, or has it been persistent across repeated evaluations?</p>
+          </div>
+          <ReleaseTrendChart evaluations={history.evaluations} />
+        </div>
+      )}
 
       <div className="grid-3">
         {/* -- metric change -- */}
@@ -157,6 +231,13 @@ export function ReleaseDecision() {
       {findings.length > 0 && (
         <div className="card">
           <h2 style={{ marginBottom: 10 }}>Significant findings</h2>
+          {findings.length > 1 && (
+            <div style={{ marginBottom: 16 }}>
+              <SegmentEffectChart
+                rows={findings.filter((f) => f.excess_contribution !== null).map((f) => ({ segment_label: f.segment_label, excess_contribution: f.excess_contribution as number }))}
+              />
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {findings.map((f) => (
               <div key={f.segment_label} style={{ borderTop: '1px solid var(--color-border)', paddingTop: 12 }}>

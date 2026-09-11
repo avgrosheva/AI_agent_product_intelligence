@@ -56,10 +56,21 @@ app = FastAPI(
 # without this every request is blocked by the browser before it reaches
 # a router. Scoped to localhost dev ports only — this is a local portfolio
 # demo, not a deployed multi-origin service.
+#
+# Stage 16 fix: allow_methods was left at ["GET"] from Stage 6, when the
+# frontend only ever read data. Every mutating request since then --
+# login itself (POST /auth/login), register, onboarding's config PUT,
+# release-evaluations, monitoring-config/notification-channel creation,
+# org/project creation -- fails its CORS preflight and is blocked by the
+# browser before reaching a router, with no readable error beyond a
+# console CORS message (the frontend's catch block sees a generic fetch
+# failure, not an ApiError, and shows "Login failed" regardless of
+# whether credentials were even checked). This was the actual root cause
+# of login itself never working through the dev frontend.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 

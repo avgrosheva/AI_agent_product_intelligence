@@ -1,41 +1,97 @@
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useSessions, type SessionFilters } from '../api/hooks'
+import { useDomainMechanisms, useDomainSessions, useSegmentDimensions } from '../api/hooks'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
-import { DIMENSION_VALUES, FILTERABLE_DIMENSIONS } from '../lib/dimensionValues'
 import { formatDateTime } from '../lib/format'
 import { useActiveExperiment } from '../state/ActiveExperimentContext'
+import { useActiveProject } from '../state/ActiveProjectContext'
 
 const PAGE_SIZE = 25
+const KNOWN_PARAMS = new Set(['offset', 'experiment_id', 'agent_version', 'outcome', 'started_after', 'started_before', 'detected_mechanism', 'review_status'])
 
 const OUTCOME_CHIP: Record<string, string> = {
+  resolved: 'chip-positive',
+  converted: 'chip-positive',
   purchase: 'chip-positive',
-  add_to_cart_only: 'chip-neutral',
-  no_action: 'chip-neutral',
   abandoned: 'chip-negative',
+  escalated: 'chip-negative',
 }
 
+const REVIEW_STATUS_CHIP: Record<string, string> = {
+  unreviewed: 'chip-neutral',
+  confirmed: 'chip-positive',
+  rejected: 'chip-negative',
+  mixed: 'chip-warning',
+}
+
+function toDayStart(date: string): string {
+  return `${date}T00:00:00`
+}
+function toDayEnd(date: string): string {
+  return `${date}T23:59:59`
+}
+function fromDayBoundary(value: string): string {
+  return value.slice(0, 10)
+}
+
+/** Stage 16: domain-generic. Stage 17 task 3: restores useful filtering
+ * without hardcoding any domain's vocabulary -- outcome and time range
+ * are generic (every domain's sessions have some outcome + started_at),
+ * detected-mechanism and review-status filters only render when this
+ * domain actually has mechanisms (list_domain_mechanisms is the same
+ * "empty is valid" signal used everywhere else), and configured context
+ * dimensions come entirely from GET .../segment-dimensions -- this file
+ * never lists a dimension or outcome value by name. */
 export function Sessions() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { activeProject } = useActiveProject()
   const { activeExperimentId } = useActiveExperiment()
+  const domain = activeProject?.domain
+  const projectId = activeProject?.project_id
+
+  const { data: mechanismsData } = useDomainMechanisms(domain, projectId)
+  const { data: dimensionsData } = useSegmentDimensions(domain, projectId)
+  const mechanisms = mechanismsData?.mechanisms ?? []
+  const dimensions = dimensionsData?.dimensions ?? {}
 
   const offset = Number(searchParams.get('offset') ?? '0')
-  const filters: SessionFilters = {
-    experiment_id: searchParams.get('experiment_id') ?? activeExperimentId ?? undefined,
-    agent_version: searchParams.get('agent_version') ?? undefined,
-    requested_category: searchParams.get('requested_category') ?? undefined,
-    constraint_count_bucket: searchParams.get('constraint_count_bucket') ?? undefined,
-    platform: searchParams.get('platform') ?? undefined,
-    device_tier: searchParams.get('device_tier') ?? undefined,
-    locale: searchParams.get('locale') ?? undefined,
-    persona: searchParams.get('persona') ?? undefined,
-    outcome: searchParams.get('outcome') ?? undefined,
-    failure_mode: searchParams.get('failure_mode') ?? undefined,
-    limit: PAGE_SIZE,
-    offset,
+  const experimentId = searchParams.get('experiment_id') ?? activeExperimentId ?? undefined
+  const agentVersion = searchParams.get('agent_version') ?? undefined
+  const outcome = searchParams.get('outcome') ?? ''
+  const startedAfter = searchParams.get('started_after') ?? ''
+  const startedBefore = searchParams.get('started_before') ?? ''
+  const detectedMechanism = searchParams.get('detected_mechanism') ?? ''
+  const reviewStatus = searchParams.get('review_status') ?? ''
+
+  const dimensionFilters: Record<string, string> = {}
+  for (const key of Object.keys(dimensions)) {
+    const value = searchParams.get(key)
+    if (value) dimensionFilters[key] = value
+  }
+  // Any OTHER param not recognized above (e.g. a segment dimension this
+  // project doesn't have loaded into `dimensions` yet, or one arriving
+  // from a Finding's "View sessions" link) is still forwarded as-is --
+  // the backend applies whichever of its own registered dimensions
+  // match and ignores the rest, so this page never has to know every
+  // dimension in advance to forward it correctly.
+  const passthroughFilters: Record<string, string> = {}
+  for (const [key, value] of searchParams.entries()) {
+    if (!KNOWN_PARAMS.has(key) && !(key in dimensions) && !(key in dimensionFilters)) passthroughFilters[key] = value
   }
 
-  const { data, isLoading, error } = useSessions(filters)
+  const { data, isLoading, error } = useDomainSessions(domain, projectId, {
+    experiment_id: experimentId,
+    agent_version: agentVersion,
+    outcome: outcome || undefined,
+    started_after: startedAfter ? toDayStart(startedAfter) : undefined,
+    started_before: startedBefore ? toDayEnd(startedBefore) : undefined,
+    detected_mechanism: detectedMechanism || undefined,
+    review_status: reviewStatus || undefined,
+    limit: PAGE_SIZE,
+    offset,
+    ...dimensionFilters,
+    ...passthroughFilters,
+  })
 
   function updateFilter(key: string, value: string) {
     const next = new URLSearchParams(searchParams)
@@ -55,7 +111,9 @@ export function Sessions() {
     setSearchParams(params)
   }
 
-  const activeFilterCount = FILTERABLE_DIMENSIONS.filter((d) => searchParams.get(d.key)).length
+  const activeFilterEntries = Array.from(searchParams.entries()).filter(([k]) => k !== 'offset' && k !== 'experiment_id')
+  const activeStructuredKeys = new Set(['agent_version', 'outcome', 'started_after', 'started_before', 'detected_mechanism', 'review_status', ...Object.keys(dimensions)])
+  const activeExtraEntries = activeFilterEntries.filter(([k]) => !activeStructuredKeys.has(k))
 
   return (
     <div className="page">
@@ -67,32 +125,96 @@ export function Sessions() {
       <div className="card">
         <div className="card-header">
           <h2>Filters</h2>
-          {activeFilterCount > 0 && (
-            <button type="button" className="btn btn-small" onClick={clearFilters}>Clear all ({activeFilterCount})</button>
+          {activeFilterEntries.length > 0 && (
+            <button type="button" className="btn btn-small" onClick={clearFilters}>Clear all ({activeFilterEntries.length})</button>
           )}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-          {FILTERABLE_DIMENSIONS.map((dim) => (
-            <label key={dim.key} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-              <span className="text-muted">{dim.label}</span>
-              <select
-                value={searchParams.get(dim.key) ?? ''}
-                onChange={(e) => updateFilter(dim.key, e.target.value)}
-                style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid var(--color-border-strong)' }}
-              >
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+            <span className="text-muted">Agent version</span>
+            <select className="filter-input" value={agentVersion ?? ''} onChange={(e) => updateFilter('agent_version', e.target.value)}>
+              <option value="">Any</option>
+              <option value="v1">v1</option>
+              <option value="v2">v2</option>
+            </select>
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+            <span className="text-muted">Outcome</span>
+            <input
+              type="text"
+              className="filter-input"
+              value={outcome}
+              placeholder="Any"
+              onChange={(e) => updateFilter('outcome', e.target.value)}
+              style={{ width: 120 }}
+            />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+            <span className="text-muted">Started after</span>
+            <input type="date" className="filter-input" value={startedAfter ? fromDayBoundary(startedAfter) : ''} onChange={(e) => updateFilter('started_after', e.target.value)} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+            <span className="text-muted">Started before</span>
+            <input type="date" className="filter-input" value={startedBefore ? fromDayBoundary(startedBefore) : ''} onChange={(e) => updateFilter('started_before', e.target.value)} />
+          </label>
+
+          {mechanisms.length > 0 && (
+            <>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+                <span className="text-muted">Detected mechanism</span>
+                <select className="filter-input" value={detectedMechanism} onChange={(e) => updateFilter('detected_mechanism', e.target.value)}>
+                  <option value="">Any</option>
+                  {mechanisms.map((m) => (
+                    <option key={m.name} value={m.name}>{m.name.replace(/_/g, ' ')}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+                <span className="text-muted">Review status</span>
+                <select className="filter-input" value={reviewStatus} onChange={(e) => updateFilter('review_status', e.target.value)}>
+                  <option value="">Any</option>
+                  <option value="unreviewed">Unreviewed</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="mixed">Mixed</option>
+                </select>
+              </label>
+            </>
+          )}
+
+          {Object.entries(dimensions).map(([dim, values]) => (
+            <label key={dim} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+              <span className="text-muted">{dim.replace(/_/g, ' ')}</span>
+              <select className="filter-input" value={dimensionFilters[dim] ?? ''} onChange={(e) => updateFilter(dim, e.target.value)}>
                 <option value="">Any</option>
-                {DIMENSION_VALUES[dim.key]?.map((v) => (
+                {values.map((v) => (
                   <option key={v} value={v}>{v}</option>
                 ))}
               </select>
             </label>
+          ))}
+
+          {activeExtraEntries.map(([k, v]) => (
+            <span key={k} className="chip chip-accent" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {k.replace(/_/g, ' ')}: {v}
+              <button
+                type="button"
+                aria-label={`Remove ${k} filter`}
+                onClick={() => updateFilter(k, '')}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700, padding: 0, lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </span>
           ))}
         </div>
       </div>
 
       <div className="card">
         {isLoading && <LoadingState label="Loading sessions…" />}
-        {error && <ErrorState message={(error as Error).message} />}
+        {error && <ErrorState error={error} />}
         {data && data.items.length === 0 && <EmptyState>No sessions match these filters.</EmptyState>}
         {data && data.items.length > 0 && (
           <>
@@ -105,12 +227,9 @@ export function Sessions() {
                   <tr>
                     <th>Session</th>
                     <th>Version</th>
-                    <th>Request</th>
-                    <th>Platform</th>
                     <th>Outcome</th>
-                    <th>Failure mode</th>
-                    <th>Latency</th>
-                    <th>Cost</th>
+                    {mechanisms.length > 0 && <th>Mechanisms</th>}
+                    {mechanisms.length > 0 && <th>Review</th>}
                     <th>Started</th>
                   </tr>
                 </thead>
@@ -119,13 +238,18 @@ export function Sessions() {
                     <tr key={s.session_id} className="clickable" onClick={() => navigate(`/sessions/${s.session_id}`)}>
                       <td className="mono">{s.session_id.slice(0, 8)}…</td>
                       <td>{s.agent_version}</td>
-                      <td>{s.requested_category}, {s.constraint_count_bucket} constraints</td>
-                      <td>{s.platform}</td>
-                      <td><span className={`chip ${OUTCOME_CHIP[s.outcome] ?? 'chip-neutral'}`}>{s.outcome.replace(/_/g, ' ')}</span></td>
-                      <td>{s.detected_failure_modes.length > 0 ? s.detected_failure_modes.join(', ') : '—'}</td>
-                      <td className="mono">{s.total_latency_ms.toLocaleString('en-US')}ms</td>
-                      <td className="mono">${s.total_cost_usd.toFixed(4)}</td>
-                      <td className="text-muted">{formatDateTime(s.started_at)}</td>
+                      <td>{s.outcome ? <span className={`chip ${OUTCOME_CHIP[s.outcome] ?? 'chip-neutral'}`}>{s.outcome.replace(/_/g, ' ')}</span> : '—'}</td>
+                      {mechanisms.length > 0 && (
+                        <td className="text-secondary" style={{ fontSize: 11.5 }}>
+                          {s.detected_mechanisms.length > 0 ? s.detected_mechanisms.join(', ') : '—'}
+                        </td>
+                      )}
+                      {mechanisms.length > 0 && (
+                        <td>
+                          <span className={`chip ${REVIEW_STATUS_CHIP[s.review_status]}`} style={{ fontSize: 10.5 }}>{s.review_status}</span>
+                        </td>
+                      )}
+                      <td className="text-muted">{s.started_at ? formatDateTime(s.started_at) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

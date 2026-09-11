@@ -129,6 +129,35 @@ def test_alerts_filterable_by_severity_and_status(api_client, support_project_id
     assert all(a["status"] == "open" for a in open_only)
 
 
+def test_alerts_list_paginates_with_stable_ordering_and_metadata(api_client, support_project_id):
+    """Stage 17 task 7: alerts accumulate indefinitely across every
+    scheduled monitoring run and manual evaluation project-wide, so a bare
+    `limit` (the original signature) could only ever show the newest
+    page. Two more rollback experiments here each add at least one more
+    open, critical alert (on top of whatever earlier tests in this module
+    already created for this same support domain) -- proves total/limit/
+    offset are reported and that limit=1 pages (newest first) land on the
+    exact same alerts, in the exact same order, as one unpaginated call."""
+    exp_a = _ingest_rollback_fixture(api_client, "page_a", support_project_id)
+    exp_b = _ingest_rollback_fixture(api_client, "page_b", support_project_id)
+    api_client.post(f"/api/v1/domains/support/experiments/{exp_a}/release-evaluations?primary_metric=resolution_rate&project_id={support_project_id}")
+    api_client.post(f"/api/v1/domains/support/experiments/{exp_b}/release-evaluations?primary_metric=resolution_rate&project_id={support_project_id}")
+
+    full = api_client.get(f"/api/v1/alerts?domain=support&project_id={support_project_id}&limit=200").json()
+    scoped_experiment_ids = {a["experiment_id"] for a in full["alerts"]} & {exp_a, exp_b}
+    assert scoped_experiment_ids == {exp_a, exp_b}
+    assert full["limit"] == 200 and full["offset"] == 0
+    assert full["total"] == len(full["alerts"])  # under the 200-row cap, nothing left off this page
+
+    page1 = api_client.get(f"/api/v1/alerts?domain=support&project_id={support_project_id}&limit=1&offset=0").json()
+    page2 = api_client.get(f"/api/v1/alerts?domain=support&project_id={support_project_id}&limit=1&offset=1").json()
+    assert page1["total"] == full["total"] == page2["total"]
+    assert len(page1["alerts"]) == 1 and len(page2["alerts"]) == 1
+    assert page1["alerts"][0]["alert_id"] != page2["alerts"][0]["alert_id"]
+    assert page1["alerts"][0]["alert_id"] == full["alerts"][0]["alert_id"]
+    assert page2["alerts"][0]["alert_id"] == full["alerts"][1]["alert_id"]
+
+
 def test_commerce_release_evaluation_also_flows_through_alerts(api_client, experiment_id, commerce_project_id):
     """Compatibility (task 7): the same alert pipeline works for commerce,
     not just support — whatever verdict the dev-scale dataset produces,

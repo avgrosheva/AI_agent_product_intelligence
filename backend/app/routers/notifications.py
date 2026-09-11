@@ -61,8 +61,12 @@ def get_notification_channels(project_id: str = Query(...), domain: str = Query(
 
 @router.get("/deliveries", response_model=NotificationDeliveryListResponse)
 def get_notification_deliveries(
-    project_id: str = Query(...), domain: str = Query(...), limit: int = Query(default=50, le=200), user: CurrentUser = Depends(get_current_user)
+    project_id: str = Query(...),
+    domain: str = Query(...),
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    user: CurrentUser = Depends(get_current_user),
 ) -> NotificationDeliveryListResponse:
     engine = _authorize(project_id, domain, user)
-    results = list_deliveries(engine, project_id, limit=limit)
-    return NotificationDeliveryListResponse(deliveries=[NotificationDeliverySchema(**r.__dict__) for r in results])
+    results, total = list_deliveries(engine, project_id, limit=limit, offset=offset)
+    return NotificationDeliveryListResponse(deliveries=[NotificationDeliverySchema(**r.__dict__) for r in results], total=total, limit=limit, offset=offset)
