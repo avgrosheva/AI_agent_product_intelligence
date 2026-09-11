@@ -12,8 +12,10 @@ function renderProtected(route: string) {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<div>Login screen</div>} />
+          <Route path="/welcome" element={<div>Landing screen</div>} />
           <Route path="/setup" element={<RequireAuth><div>Setup screen</div></RequireAuth>} />
           <Route path="/project" element={<RequireAuth><div>Overview screen</div></RequireAuth>} />
+          <Route path="/" element={<RequireAuth><div>Root screen</div></RequireAuth>} />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,
@@ -31,5 +33,12 @@ describe('RequireAuth route protection', () => {
     renderProtected('/project')
     expect(screen.getByText('Login screen')).toBeInTheDocument()
     expect(screen.queryByText('Overview screen')).not.toBeInTheDocument()
+  })
+
+  it('sends an unauthenticated visit to the app root to the landing page, not the bare login form', () => {
+    renderProtected('/')
+    expect(screen.getByText('Landing screen')).toBeInTheDocument()
+    expect(screen.queryByText('Root screen')).not.toBeInTheDocument()
+    expect(screen.queryByText('Login screen')).not.toBeInTheDocument()
   })
 })

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ProjectConfig, ProjectConfigPatch } from '../../api/types'
 import { formatValidationErrors } from './validationError'
 
@@ -21,6 +22,7 @@ function initialValues(config: ProjectConfig): Record<string, string> {
  * context keys (config.available_context_fields) -- there is no way to
  * type in a field that doesn't exist in this project's data. */
 export function SegmentsStep({ config, onSave, saving }: Props) {
+  const { t } = useTranslation()
   const [selected, setSelected] = useState<Set<string>>(new Set(Object.keys(initialValues(config))))
   const [values, setValues] = useState<Record<string, string>>(initialValues(config))
   const [error, setError] = useState<string[] | null>(null)
@@ -41,7 +43,7 @@ export function SegmentsStep({ config, onSave, saving }: Props) {
     for (const field of selected) {
       const list = (values[field] ?? '').split(',').map((v) => v.trim()).filter(Boolean)
       if (list.length === 0) {
-        setError([`${field}: enter at least one allowed value (comma-separated) or unselect this dimension`])
+        setError([t('onboarding.segments.errorAtLeastOne', { field })])
         return
       }
       dims[field] = list
@@ -56,12 +58,12 @@ export function SegmentsStep({ config, onSave, saving }: Props) {
   return (
     <div className="card">
       <div className="card-header">
-        <h2>Segments</h2>
-        <p>Which fields from your session data should be explored when investigating a regression -- picked from fields already seen in your data.</p>
+        <h2>{t('onboarding.steps.segments')}</h2>
+        <p>{t('onboarding.segments.subtitle')}</p>
       </div>
 
       {config.available_context_fields.length === 0 ? (
-        <div className="state-box">No context fields have been seen in ingested data yet. Send some sessions with context data, then come back here.</div>
+        <div className="state-box">{t('onboarding.segments.noFields')}</div>
       ) : (
         <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {config.available_context_fields.map((field) => (
@@ -75,14 +77,14 @@ export function SegmentsStep({ config, onSave, saving }: Props) {
                   style={{ flex: 1 }}
                   value={values[field] ?? ''}
                   onChange={(e) => setValues((prev) => ({ ...prev, [field]: e.target.value }))}
-                  placeholder="allowed values, comma-separated"
+                  placeholder={t('onboarding.segments.placeholder')}
                   className="mono"
                 />
               )}
             </div>
           ))}
           <button type="submit" className="btn btn-primary" style={{ alignSelf: 'flex-start' }} disabled={saving}>
-            {saving ? 'Saving…' : 'Save segments'}
+            {saving ? t('common.saving') : t('onboarding.segments.save')}
           </button>
         </form>
       )}

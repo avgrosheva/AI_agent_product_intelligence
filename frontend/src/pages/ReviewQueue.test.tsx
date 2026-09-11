@@ -10,6 +10,7 @@ const QUEUE_ITEM = {
   session_id: 'session-abc12345', experiment_id: EXP_ID, agent_version: 'v2', failure_mode: 'unnecessary_clarification',
   detector_source: 'semantic', confidence: 0.87, evidence_text: 'Agent asked for size despite it being stated.',
   reviewed: false, high_impact: true,
+  detector_version: 'rule_based_mock-v1', provider: null, model: null, prompt_version: null, is_newest_version: true,
 }
 
 let currentItems = [QUEUE_ITEM]

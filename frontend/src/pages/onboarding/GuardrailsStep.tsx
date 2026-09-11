@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AvailableGuardrail, GuardrailConfigEntry, ProjectConfig, ProjectConfigPatch } from '../../api/types'
 import { formatValidationErrors } from './validationError'
 
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export function GuardrailsStep({ config, onSave, saving }: Props) {
+  const { t } = useTranslation()
   const [showAddForm, setShowAddForm] = useState(false)
   const [name, setName] = useState('')
   const [metric, setMetric] = useState('')
@@ -76,21 +78,21 @@ export function GuardrailsStep({ config, onSave, saving }: Props) {
   return (
     <div className="card">
       <div className="card-header">
-        <h2>Guardrails</h2>
-        <p>Automatic checks that can block a ship decision when a metric moves too far in the wrong direction.</p>
+        <h2>{t('onboarding.steps.guardrails')}</h2>
+        <p>{t('onboarding.guardrails.subtitle')}</p>
       </div>
 
       <div className="table-scroll">
         <table className="data-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Metric</th>
-              <th>Column</th>
-              <th>Threshold</th>
-              <th>Direction</th>
-              <th>Severity</th>
-              <th>Status</th>
+              <th>{t('onboarding.guardrails.colName')}</th>
+              <th>{t('onboarding.guardrails.colMetric')}</th>
+              <th>{t('onboarding.guardrails.colColumn')}</th>
+              <th>{t('onboarding.guardrails.colThreshold')}</th>
+              <th>{t('onboarding.guardrails.colDirection')}</th>
+              <th>{t('onboarding.guardrails.colSeverity')}</th>
+              <th>{t('onboarding.guardrails.colStatus')}</th>
               <th></th>
             </tr>
           </thead>
@@ -106,78 +108,78 @@ export function GuardrailsStep({ config, onSave, saving }: Props) {
                   <span className={`chip ${g.severity === 'blocking' ? 'chip-negative' : 'chip-warning'}`}>{g.severity}</span>
                 </td>
                 <td>
-                  <span className={`chip ${g.enabled ? 'chip-positive' : 'chip-neutral'}`}>{g.enabled ? 'Enabled' : 'Disabled'}</span>
+                  <span className={`chip ${g.enabled ? 'chip-positive' : 'chip-neutral'}`}>{g.enabled ? t('onboarding.guardrails.enabled') : t('onboarding.guardrails.disabled')}</span>
                 </td>
                 <td style={{ display: 'flex', gap: 6 }}>
                   <button type="button" className="btn btn-small" onClick={() => toggleEnabled(g)} disabled={saving}>
-                    {g.enabled ? 'Disable' : 'Enable'}
+                    {g.enabled ? t('onboarding.guardrails.disableBtn') : t('onboarding.guardrails.enableBtn')}
                   </button>
-                  <button type="button" className="btn btn-small" onClick={() => removeGuardrail(g)} disabled={saving}>Remove</button>
+                  <button type="button" className="btn btn-small" onClick={() => removeGuardrail(g)} disabled={saving}>{t('onboarding.guardrails.remove')}</button>
                 </td>
               </tr>
             ))}
             {config.available_guardrails.length === 0 && (
-              <tr><td colSpan={8} className="text-muted">No guardrails configured.</td></tr>
+              <tr><td colSpan={8} className="text-muted">{t('onboarding.guardrails.noneConfigured')}</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-        {!showAddForm && <button type="button" className="btn btn-small" onClick={() => setShowAddForm(true)}>+ Add a guardrail</button>}
-        {config.guardrails !== null && <button type="button" className="btn btn-small" onClick={resetToDefaults} disabled={saving}>Reset to domain defaults</button>}
+        {!showAddForm && <button type="button" className="btn btn-small" onClick={() => setShowAddForm(true)}>{t('onboarding.guardrails.addGuardrail')}</button>}
+        {config.guardrails !== null && <button type="button" className="btn btn-small" onClick={resetToDefaults} disabled={saving}>{t('onboarding.guardrails.resetToDefaults')}</button>}
       </div>
 
       {showAddForm && (
         <form onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14, borderTop: '1px solid var(--color-border)', paddingTop: 14 }}>
           <div className="grid-3">
             <label className="field">
-              <span>Name (unique)</span>
+              <span>{t('onboarding.guardrails.nameUnique')}</span>
               <input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
             </label>
             <label className="field">
-              <span>Watches metric</span>
+              <span>{t('onboarding.guardrails.watchesMetric')}</span>
               <select value={metric} onChange={(e) => setMetric(e.target.value)}>
-                <option value="">-- optional, descriptive only --</option>
+                <option value="">{t('onboarding.guardrails.optionalDescriptiveOnly')}</option>
                 {config.available_metrics.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
               </select>
             </label>
             <label className="field">
-              <span>Data column</span>
-              <input value={column} onChange={(e) => setColumn(e.target.value)} required placeholder="e.g. handle_time_seconds" />
+              <span>{t('onboarding.guardrails.dataColumn')}</span>
+              <input value={column} onChange={(e) => setColumn(e.target.value)} required placeholder={t('onboarding.guardrails.dataColumnPlaceholder')} />
             </label>
             <label className="field">
-              <span>Aggregation</span>
+              <span>{t('onboarding.guardrails.aggregation')}</span>
               <select value={aggregation} onChange={(e) => setAggregation(e.target.value)}>
                 {AGGREGATIONS.map((a) => <option key={a} value={a}>{a}</option>)}
               </select>
             </label>
             <label className="field">
-              <span>Comparison</span>
+              <span>{t('onboarding.guardrails.comparison')}</span>
               <select value={kind} onChange={(e) => setKind(e.target.value)}>
                 {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
               </select>
             </label>
             <label className="field">
-              <span>Threshold</span>
+              <span>{t('onboarding.guardrails.threshold')}</span>
               <input value={threshold} onChange={(e) => setThreshold(e.target.value)} required type="number" step="any" />
             </label>
             <label className="field">
-              <span>Direction</span>
+              <span>{t('onboarding.guardrails.direction')}</span>
               <select value={direction} onChange={(e) => setDirection(e.target.value)}>
                 {DIRECTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </label>
             <label className="field">
-              <span>Severity</span>
+              <span>{t('onboarding.guardrails.severity')}</span>
               <select value={severity} onChange={(e) => setSeverity(e.target.value)}>
                 {SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Add guardrail'}</button>
-            <button type="button" className="btn" onClick={() => setShowAddForm(false)}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? t('common.saving') : t('onboarding.guardrails.addGuardrailBtn')}</button>
+            <button type="button" className="btn" onClick={() => setShowAddForm(false)}>{t('common.cancel')}</button>
           </div>
         </form>
       )}

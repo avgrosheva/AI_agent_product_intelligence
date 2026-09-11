@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useClassifierEvaluation, useDomainSessionDetail } from '../api/hooks'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
 import { MockClassifierBanner } from '../components/common/MockClassifierBanner'
+import { formatDateTime } from '../lib/format'
 import { useActiveProject } from '../state/ActiveProjectContext'
 
 const OUTCOME_CHIP: Record<string, string> = {
@@ -23,6 +25,7 @@ const OUTCOME_CHIP: Record<string, string> = {
  * "Show raw / technical detail" still exposes the full JSON response for
  * anything domain-specific ingested beyond the generic shape. */
 export function SessionDetail() {
+  const { t } = useTranslation()
   const { sessionId } = useParams<{ sessionId: string }>()
   const [showRaw, setShowRaw] = useState(false)
   const { activeProject } = useActiveProject()
@@ -31,16 +34,16 @@ export function SessionDetail() {
   const { data: session, isLoading, error } = useDomainSessionDetail(domain, projectId, sessionId)
   const { data: classifierEval } = useClassifierEvaluation()
 
-  if (isLoading) return <div className="page"><LoadingState label="Loading session…" /></div>
+  if (isLoading) return <div className="page"><LoadingState label={t('sessionDetail.loadingSession')} /></div>
   if (error) return <div className="page"><ErrorState error={error} /></div>
-  if (!session) return <div className="page"><EmptyState>Session not found.</EmptyState></div>
+  if (!session) return <div className="page"><EmptyState>{t('sessionDetail.notFound')}</EmptyState></div>
 
   return (
     <div className="page">
       <div>
-        <Link to="/sessions" className="text-secondary" style={{ fontSize: 12.5 }}>← Back to sessions</Link>
+        <Link to="/sessions" className="text-secondary" style={{ fontSize: 12.5 }}>{t('sessionDetail.backToSessions')}</Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
-          <h1>Session {session.session_id.slice(0, 8)}…</h1>
+          <h1>{t('sessionDetail.session', { id: session.session_id.slice(0, 8) })}</h1>
           <span className={`chip ${OUTCOME_CHIP[session.outcome] ?? 'chip-neutral'}`}>{session.outcome.replace(/_/g, ' ')}</span>
           <span className="chip chip-neutral">{session.domain}</span>
         </div>
@@ -50,20 +53,34 @@ export function SessionDetail() {
         <>
           {classifierEval && <MockClassifierBanner provenance={classifierEval.provenance} />}
           <div className="card">
-            <div className="card-header"><h2>Detected failure mechanisms</h2><p>A session can have zero, one, or several — mechanisms are not mutually exclusive.</p></div>
+            <div className="card-header"><h2>{t('sessionDetail.detectedMechanisms')}</h2><p>{t('sessionDetail.detectedMechanismsSub')}</p></div>
             {session.failure_attributions.map((f) => (
               <div key={f.failure_mode} style={{ marginBottom: 10 }}>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 4 }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' }}>
                   <span className="chip chip-warning">{f.failure_mode.replace(/_/g, ' ')}</span>
-                  <span className="text-muted" style={{ fontSize: 12 }}>source: {f.detector_source.replace(/_/g, ' ')}</span>
+                  <span className="text-muted" style={{ fontSize: 12 }}>{t('sessionDetail.source', { value: f.detector_source.replace(/_/g, ' ') })}</span>
                   {f.confidence !== null && (
-                    <span className="text-muted" style={{ fontSize: 12 }}>confidence {(f.confidence * 100).toFixed(0)}%</span>
+                    <span className="text-muted" style={{ fontSize: 12 }}>{t('sessionDetail.confidence', { value: (f.confidence * 100).toFixed(0) })}</span>
                   )}
                   {f.review_status !== 'unreviewed' && (
                     <span className={`chip ${f.review_status === 'confirmed' ? 'chip-positive' : 'chip-negative'}`} style={{ fontSize: 10.5 }}>
                       {f.review_status}
                     </span>
                   )}
+                </div>
+                {/* Stage 19 task 8: version-level provenance -- always
+                    visible (which detector version and, for semantic
+                    mechanisms, which model/prompt actually produced
+                    this), plus who reviewed it and when once it has
+                    been. */}
+                <div className="text-muted" style={{ fontSize: 10.5, marginBottom: 4 }}>
+                  {t('sessionDetail.detector', { version: f.detector_version || '—' })}
+                  {f.provider && ` · ${f.provider}/${f.model}`}
+                  {f.prompt_version && ` · prompt ${f.prompt_version}`}
+                  {f.review_status !== 'unreviewed' && (
+                    <> · {t('sessionDetail.reviewed')}{f.reviewer ? t('sessionDetail.reviewedBy', { reviewer: f.reviewer }) : ''}{f.reviewed_at ? t('sessionDetail.reviewedOn', { date: formatDateTime(f.reviewed_at) }) : ''}</>
+                  )}
+                  {f.corrected_mechanism && t('sessionDetail.correctedTo', { value: f.corrected_mechanism.replace(/_/g, ' ') })}
                 </div>
                 {f.evidence_text && <p style={{ fontSize: 13 }}>{f.evidence_text}</p>}
               </div>
@@ -74,8 +91,8 @@ export function SessionDetail() {
 
       <div className="card">
         <div className="card-header">
-          <h2>Timeline</h2>
-          <p>User/agent transcript, action sequence, and tool calls for this session — no chain-of-thought.</p>
+          <h2>{t('sessionDetail.timeline')}</h2>
+          <p>{t('sessionDetail.timelineSub')}</p>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {session.transcript.map(([sender, text], i) => (
@@ -84,13 +101,13 @@ export function SessionDetail() {
               <span style={{ fontSize: 13 }}>{text}</span>
             </div>
           ))}
-          {session.transcript.length === 0 && <EmptyState>No transcript recorded for this session.</EmptyState>}
+          {session.transcript.length === 0 && <EmptyState>{t('sessionDetail.noTranscript')}</EmptyState>}
         </div>
 
         {session.action_sequence.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-              Action sequence
+              {t('sessionDetail.actionSequence')}
             </div>
             <div className="mono" style={{ fontSize: 12.5 }}>{session.action_sequence.join(' → ')}</div>
           </div>
@@ -99,16 +116,16 @@ export function SessionDetail() {
         {session.tool_calls.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-              Tool calls
+              {t('sessionDetail.toolCalls')}
             </div>
             <div className="table-scroll">
               <table className="data-table">
-                <thead><tr><th>Tool</th><th>Success</th><th>Error</th></tr></thead>
+                <thead><tr><th>{t('sessionDetail.tool')}</th><th>{t('sessionDetail.success')}</th><th>{t('sessionDetail.error')}</th></tr></thead>
                 <tbody>
                   {session.tool_calls.map((tc, i) => (
                     <tr key={i}>
                       <td>{tc.tool_name}</td>
-                      <td>{tc.success ? 'yes' : 'no'}</td>
+                      <td>{tc.success ? t('sessionDetail.yes') : t('sessionDetail.no')}</td>
                       <td className="text-muted">{tc.error_type === 'none' ? '—' : tc.error_type}</td>
                     </tr>
                   ))}
@@ -121,10 +138,17 @@ export function SessionDetail() {
 
       <div className="card">
         <button type="button" className="btn btn-small" onClick={() => setShowRaw((v) => !v)} aria-expanded={showRaw}>
-          {showRaw ? 'Hide' : 'Show'} raw / technical detail
+          {showRaw ? t('sessionDetail.hideRaw') : t('sessionDetail.showRaw')}
         </button>
         {showRaw && (
-          <pre className="mono" style={{ marginTop: 12, fontSize: 11, whiteSpace: 'pre-wrap', overflowX: 'auto' }}>
+          <pre
+            className="mono"
+            style={{
+              marginTop: 12, fontSize: 11, whiteSpace: 'pre-wrap', overflowX: 'auto',
+              background: 'var(--color-surface-tint)', border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-sm)', padding: 12,
+            }}
+          >
 {JSON.stringify(session, null, 2)}
           </pre>
         )}

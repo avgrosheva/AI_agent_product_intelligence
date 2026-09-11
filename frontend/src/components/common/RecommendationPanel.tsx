@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Recommendation } from '../../api/types'
 
 const VERDICT_META: Record<Recommendation['verdict'], { label: string; cls: string }> = {
@@ -13,6 +14,7 @@ const VERDICT_META: Record<Recommendation['verdict'], { label: string; cls: stri
  * literal rule text from backend.investigation.recommend, not a summary
  * this component writes. */
 export function RecommendationPanel({ recommendation }: { recommendation: Recommendation }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const meta = VERDICT_META[recommendation.verdict]
 
@@ -21,18 +23,18 @@ export function RecommendationPanel({ recommendation }: { recommendation: Recomm
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
         <span className={`chip ${meta.cls}`} style={{ fontSize: 14, padding: '5px 14px' }}>{meta.label}</span>
         <span className="text-muted" style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          Decision rule result
+          {t('recommendationPanel.decisionRuleResult')}
         </span>
       </div>
       <p style={{ fontSize: 13.5, marginBottom: 10 }}>{recommendation.primary_reason}</p>
-      <p style={{ fontSize: 13, marginBottom: 4 }}><strong>Next action:</strong> {recommendation.next_action}</p>
+      <p style={{ fontSize: 13, marginBottom: 4 }}><strong>{t('recommendationPanel.nextAction')}</strong> {recommendation.next_action}</p>
       {recommendation.blocking_guardrails.length > 0 && (
         <p style={{ fontSize: 13 }}>
-          <strong>Blocking guardrail(s):</strong> {recommendation.blocking_guardrails.join(', ')}
+          <strong>{t('recommendationPanel.blockingGuardrails')}</strong> {recommendation.blocking_guardrails.join(', ')}
         </p>
       )}
       <button type="button" className="btn btn-small" style={{ marginTop: 10 }} onClick={() => setExpanded((e) => !e)} aria-expanded={expanded}>
-        {expanded ? 'Hide decision rules' : 'Show decision rules'}
+        {expanded ? t('recommendationPanel.hideDecisionRules') : t('recommendationPanel.showDecisionRules')}
       </button>
       {expanded && (
         <ul style={{ marginTop: 10, paddingLeft: 18, fontSize: 12.5 }} className="text-secondary">

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   useCreateMonitoringConfig,
   useCreateNotificationChannel,
@@ -13,11 +14,11 @@ import { formatValidationErrors } from './validationError'
 // Mirrors backend.project_config.service.VALID_EVENT_TYPES -- a small,
 // stable vocabulary not worth a round trip to expose dynamically.
 const EVENT_TYPES = [
-  { value: 'ROLLBACK', label: 'A release is rolled back' },
-  { value: 'HOLD', label: 'A release is held' },
-  { value: 'BLOCKING_GUARDRAIL_BREACH', label: 'A blocking guardrail is breached' },
-  { value: 'CRITICAL_DATA_QUALITY', label: 'Data quality turns critical' },
-  { value: 'MONITORING_JOB_FAILURE', label: 'A scheduled monitoring run fails' },
+  { value: 'ROLLBACK', labelKey: 'onboarding.monitoring.eventRollback' },
+  { value: 'HOLD', labelKey: 'onboarding.monitoring.eventHold' },
+  { value: 'BLOCKING_GUARDRAIL_BREACH', labelKey: 'onboarding.monitoring.eventBlockingGuardrail' },
+  { value: 'CRITICAL_DATA_QUALITY', labelKey: 'onboarding.monitoring.eventCriticalDataQuality' },
+  { value: 'MONITORING_JOB_FAILURE', labelKey: 'onboarding.monitoring.eventMonitoringFailure' },
 ]
 
 interface Props {
@@ -29,6 +30,7 @@ interface Props {
 }
 
 export function MonitoringStep({ domain, projectId, config, onSave, saving }: Props) {
+  const { t } = useTranslation()
   const experimentsQuery = useGenericExperiments(domain, projectId)
   const monitoringQuery = useMonitoringConfigs(domain, projectId)
   const createMonitoring = useCreateMonitoringConfig(domain, projectId)
@@ -107,14 +109,14 @@ export function MonitoringStep({ domain, projectId, config, onSave, saving }: Pr
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="card">
         <div className="card-header">
-          <h2>Scheduled monitoring</h2>
-          <p>How often each experiment is automatically re-evaluated, and over what data window.</p>
+          <h2>{t('onboarding.monitoring.schedulingTitle')}</h2>
+          <p>{t('onboarding.monitoring.schedulingSubtitle')}</p>
         </div>
 
         <div className="table-scroll">
           <table className="data-table">
             <thead>
-              <tr><th>Experiment</th><th>Primary metric</th><th>Cadence</th><th>Window</th><th>Status</th></tr>
+              <tr><th>{t('onboarding.monitoring.colExperiment')}</th><th>{t('onboarding.monitoring.colPrimaryMetric')}</th><th>{t('onboarding.monitoring.colCadence')}</th><th>{t('onboarding.monitoring.colWindow')}</th><th>{t('onboarding.monitoring.colStatus')}</th></tr>
             </thead>
             <tbody>
               {(monitoringQuery.data?.configs ?? []).map((c) => (
@@ -122,53 +124,53 @@ export function MonitoringStep({ domain, projectId, config, onSave, saving }: Pr
                   <td>{experiments.find((e) => e.experiment_id === c.experiment_id)?.name ?? c.experiment_id}</td>
                   <td className="mono">{c.primary_metric}</td>
                   <td>{c.cadence_seconds}s</td>
-                  <td>{c.window_hours ? `${c.window_hours}h` : 'full history'}</td>
-                  <td><span className={`chip ${c.enabled ? 'chip-positive' : 'chip-neutral'}`}>{c.enabled ? 'Enabled' : 'Disabled'}</span></td>
+                  <td>{c.window_hours ? `${c.window_hours}h` : t('onboarding.monitoring.fullHistory')}</td>
+                  <td><span className={`chip ${c.enabled ? 'chip-positive' : 'chip-neutral'}`}>{c.enabled ? t('onboarding.monitoring.enabled') : t('onboarding.monitoring.disabled')}</span></td>
                 </tr>
               ))}
               {(monitoringQuery.data?.configs ?? []).length === 0 && (
-                <tr><td colSpan={5} className="text-muted">No monitoring scheduled yet.</td></tr>
+                <tr><td colSpan={5} className="text-muted">{t('onboarding.monitoring.noneScheduled')}</td></tr>
               )}
             </tbody>
           </table>
         </div>
 
         {!showMonitoringForm && experiments.length > 0 && (
-          <button type="button" className="btn btn-small" style={{ marginTop: 14 }} onClick={() => setShowMonitoringForm(true)}>+ Schedule monitoring</button>
+          <button type="button" className="btn btn-small" style={{ marginTop: 14 }} onClick={() => setShowMonitoringForm(true)}>{t('onboarding.monitoring.scheduleBtn')}</button>
         )}
-        {experiments.length === 0 && <p className="text-muted" style={{ fontSize: 12.5, marginTop: 12 }}>No experiments exist yet for this project.</p>}
+        {experiments.length === 0 && <p className="text-muted" style={{ fontSize: 12.5, marginTop: 12 }}>{t('onboarding.monitoring.noExperiments')}</p>}
 
         {showMonitoringForm && (
           <form onSubmit={handleAddMonitoring} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14, borderTop: '1px solid var(--color-border)', paddingTop: 14 }}>
             <div className="grid-2">
               <label className="field">
-                <span>Experiment</span>
+                <span>{t('onboarding.monitoring.colExperiment')}</span>
                 <select value={experimentId} onChange={(e) => setExperimentId(e.target.value)}>
                   {experiments.map((e) => <option key={e.experiment_id} value={e.experiment_id}>{e.name}</option>)}
                 </select>
               </label>
               <label className="field">
-                <span>Primary metric</span>
+                <span>{t('onboarding.monitoring.colPrimaryMetric')}</span>
                 <select value={primaryMetric} onChange={(e) => setPrimaryMetric(e.target.value)}>
                   {inferentialMetrics.map((m) => <option key={m.name} value={m.name}>{m.label || humanizeMetricName(m.name)}</option>)}
                 </select>
               </label>
               <label className="field">
-                <span>Cadence (seconds)</span>
+                <span>{t('onboarding.monitoring.cadenceSeconds')}</span>
                 <input type="number" min={1} value={cadenceSeconds} onChange={(e) => setCadenceSeconds(Number(e.target.value))} />
               </label>
               <label className="field">
-                <span>Window (hours)</span>
+                <span>{t('onboarding.monitoring.windowHours')}</span>
                 <input type="number" min={1} value={windowHours} onChange={(e) => setWindowHours(Number(e.target.value))} />
               </label>
             </div>
             <label className="checkbox-field">
               <input type="checkbox" checked={monitoringEnabled} onChange={(e) => setMonitoringEnabled(e.target.checked)} />
-              Enabled
+              {t('onboarding.monitoring.enabled')}
             </label>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button type="submit" className="btn btn-primary" disabled={createMonitoring.isPending}>{createMonitoring.isPending ? 'Saving…' : 'Schedule'}</button>
-              <button type="button" className="btn" onClick={() => setShowMonitoringForm(false)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={createMonitoring.isPending}>{createMonitoring.isPending ? t('common.saving') : t('onboarding.monitoring.schedule')}</button>
+              <button type="button" className="btn" onClick={() => setShowMonitoringForm(false)}>{t('common.cancel')}</button>
             </div>
           </form>
         )}
@@ -177,72 +179,72 @@ export function MonitoringStep({ domain, projectId, config, onSave, saving }: Pr
 
       <div className="card">
         <div className="card-header">
-          <h2>Notification events</h2>
-          <p>Which events should trigger a notification through this project's configured channels.</p>
+          <h2>{t('onboarding.monitoring.notificationEventsTitle')}</h2>
+          <p>{t('onboarding.monitoring.notificationEventsSubtitle')}</p>
         </div>
         <div className="inline-list">
           {EVENT_TYPES.map((et) => (
             <label key={et.value} className="checkbox-field">
               <input type="checkbox" checked={rules.has(et.value)} onChange={() => toggleRule(et.value)} />
-              {et.label}
+              {t(et.labelKey)}
             </label>
           ))}
         </div>
         <button type="button" className="btn btn-primary" style={{ marginTop: 14, alignSelf: 'flex-start' }} onClick={handleSaveRules} disabled={saving}>
-          {saving ? 'Saving…' : 'Save notification events'}
+          {saving ? t('common.saving') : t('onboarding.monitoring.saveNotificationEvents')}
         </button>
         {rulesError && <div className="chip chip-negative" style={{ marginTop: 12 }}>{rulesError.join('; ')}</div>}
       </div>
 
       <div className="card">
         <div className="card-header">
-          <h2>Notification channels</h2>
-          <p>Where notifications are sent. A channel's full URL is only ever shown once, right after you create it.</p>
+          <h2>{t('onboarding.monitoring.channelsTitle')}</h2>
+          <p>{t('onboarding.monitoring.channelsSubtitle')}</p>
         </div>
         <div className="table-scroll">
           <table className="data-table">
-            <thead><tr><th>Type</th><th>URL</th><th>Status</th></tr></thead>
+            <thead><tr><th>{t('onboarding.monitoring.colType')}</th><th>{t('onboarding.monitoring.colUrl')}</th><th>{t('onboarding.monitoring.colStatus')}</th></tr></thead>
             <tbody>
               {(channelsQuery.data?.channels ?? []).map((c) => (
                 <tr key={c.channel_id}>
                   <td>{c.channel_type}</td>
                   <td className="mono">{c.url_preview}</td>
-                  <td><span className={`chip ${c.enabled ? 'chip-positive' : 'chip-neutral'}`}>{c.enabled ? 'Enabled' : 'Disabled'}</span></td>
+                  <td><span className={`chip ${c.enabled ? 'chip-positive' : 'chip-neutral'}`}>{c.enabled ? t('onboarding.monitoring.enabled') : t('onboarding.monitoring.disabled')}</span></td>
                 </tr>
               ))}
               {(channelsQuery.data?.channels ?? []).length === 0 && (
-                <tr><td colSpan={3} className="text-muted">No notification channels yet.</td></tr>
+                <tr><td colSpan={3} className="text-muted">{t('onboarding.monitoring.noneChannels')}</td></tr>
               )}
             </tbody>
           </table>
         </div>
 
         {!showChannelForm && (
-          <button type="button" className="btn btn-small" style={{ marginTop: 14 }} onClick={() => setShowChannelForm(true)}>+ Add a channel</button>
+          <button type="button" className="btn btn-small" style={{ marginTop: 14 }} onClick={() => setShowChannelForm(true)}>{t('onboarding.monitoring.addChannelBtn')}</button>
         )}
 
         {showChannelForm && (
           <form onSubmit={handleAddChannel} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14, borderTop: '1px solid var(--color-border)', paddingTop: 14 }}>
             <div className="grid-2">
               <label className="field">
-                <span>Type</span>
+                <span>{t('onboarding.monitoring.colType')}</span>
                 <select value={channelType} onChange={(e) => setChannelType(e.target.value as 'webhook' | 'slack_webhook')}>
-                  <option value="webhook">Webhook</option>
-                  <option value="slack_webhook">Slack webhook</option>
+                  <option value="webhook">{t('onboarding.monitoring.webhook')}</option>
+                  <option value="slack_webhook">{t('onboarding.monitoring.slackWebhook')}</option>
                 </select>
               </label>
               <label className="field">
-                <span>URL</span>
+                <span>{t('onboarding.monitoring.colUrl')}</span>
                 <input value={channelUrl} onChange={(e) => setChannelUrl(e.target.value)} required className="mono" placeholder="https://…" />
               </label>
             </div>
             <label className="checkbox-field">
               <input type="checkbox" checked={channelEnabled} onChange={(e) => setChannelEnabled(e.target.checked)} />
-              Enabled
+              {t('onboarding.monitoring.enabled')}
             </label>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button type="submit" className="btn btn-primary" disabled={createChannel.isPending}>{createChannel.isPending ? 'Saving…' : 'Add channel'}</button>
-              <button type="button" className="btn" onClick={() => setShowChannelForm(false)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={createChannel.isPending}>{createChannel.isPending ? t('common.saving') : t('onboarding.monitoring.addChannel')}</button>
+              <button type="button" className="btn" onClick={() => setShowChannelForm(false)}>{t('common.cancel')}</button>
             </div>
           </form>
         )}

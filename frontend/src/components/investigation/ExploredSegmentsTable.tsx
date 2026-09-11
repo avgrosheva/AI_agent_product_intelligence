@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ExploredSegmentSummary } from '../../api/types'
 import { formatPValue, humanizeSegmentLabel } from '../../lib/format'
 
@@ -6,6 +7,7 @@ import { formatPValue, humanizeSegmentLabel } from '../../lib/format'
  * show raw 57-segment scan by default. Provide a secondary 'Explored
  * segments' section for completeness."). */
 export function ExploredSegmentsTable({ segments }: { segments: ExploredSegmentSummary[] }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
 
   return (
@@ -16,18 +18,18 @@ export function ExploredSegmentsTable({ segments }: { segments: ExploredSegmentS
         aria-expanded={open}
         className="btn btn-small"
       >
-        {open ? 'Hide' : 'Show'} explored segments ({segments.length})
+        {t(open ? 'exploredSegments.hideExplored' : 'exploredSegments.showExplored', { count: segments.length })}
       </button>
       {open && (
         <div className="table-scroll" style={{ marginTop: 14 }}>
           <table className="data-table">
             <thead>
               <tr>
-                <th>Segment</th>
-                <th>p-value</th>
-                <th>BH significant</th>
-                <th>Meets min. effect</th>
-                <th>Verdict</th>
+                <th>{t('exploredSegments.segment')}</th>
+                <th>{t('exploredSegments.pValue')}</th>
+                <th>{t('exploredSegments.bhSignificant')}</th>
+                <th>{t('exploredSegments.meetsMinEffect')}</th>
+                <th>{t('exploredSegments.verdict')}</th>
               </tr>
             </thead>
             <tbody>
@@ -35,8 +37,8 @@ export function ExploredSegmentsTable({ segments }: { segments: ExploredSegmentS
                 <tr key={s.segment_label}>
                   <td>{humanizeSegmentLabel(s.segment_label)}</td>
                   <td className="mono">{formatPValue(s.p_value)}</td>
-                  <td>{s.bh_significant ? 'yes' : 'no'}</td>
-                  <td>{s.meets_min_effect ? 'yes' : 'no'}</td>
+                  <td>{s.bh_significant ? t('exploredSegments.yes') : t('exploredSegments.no')}</td>
+                  <td>{s.meets_min_effect ? t('exploredSegments.yes') : t('exploredSegments.no')}</td>
                   <td>{s.verdict.replace(/_/g, ' ')}</td>
                 </tr>
               ))}

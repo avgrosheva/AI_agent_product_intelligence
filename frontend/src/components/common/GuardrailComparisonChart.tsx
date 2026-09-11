@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { GenericGuardrailCheck } from '../../api/types'
 
 /** Per-guardrail v1-vs-v2 bar comparison, one row per check. Each row is
@@ -10,6 +11,7 @@ import type { GenericGuardrailCheck } from '../../api/types'
  * is exactly the signal that should inform a ship/hold call before a
  * guardrail actually trips. */
 export function GuardrailComparisonChart({ checks }: { checks: GenericGuardrailCheck[] }) {
+  const { t } = useTranslation()
   if (checks.length === 0) return null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -22,7 +24,7 @@ export function GuardrailComparisonChart({ checks }: { checks: GenericGuardrailC
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
               <span style={{ fontSize: 12.5, fontWeight: 600 }}>{c.name.replace(/_/g, ' ')}</span>
               <span className={`chip ${c.breached ? 'chip-negative' : 'chip-neutral'}`} style={{ fontSize: 10 }}>
-                {c.breached ? 'breached' : 'ok'}
+                {c.breached ? t('guardrailChart.breached') : t('guardrailChart.ok')}
               </span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -39,7 +41,13 @@ export function GuardrailComparisonChart({ checks }: { checks: GenericGuardrailC
                   <div
                     style={{
                       width: `${v2Pct}%`, height: '100%', borderRadius: 3,
-                      background: c.breached ? 'var(--color-negative)' : 'var(--color-accent)',
+                      // Stage 20: never the brand accent here -- "not
+                      // breached" is a neutral state (same "ok is not
+                      // exciting good news" call as the chip beside it
+                      // being chip-neutral, not chip-positive), and using
+                      // the brand's violet for a status would blur the
+                      // line between UI chrome and guardrail health.
+                      background: c.breached ? 'var(--color-negative)' : 'var(--color-neutral)',
                     }}
                   />
                 </div>

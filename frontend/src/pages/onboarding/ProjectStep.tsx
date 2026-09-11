@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAvailableDomains, useCreateOrganization, useCreateProject, useMe } from '../../api/hooks'
 import { useActiveProject } from '../../state/ActiveProjectContext'
 import { formatValidationErrors } from './validationError'
 
 export function ProjectStep() {
+  const { t } = useTranslation()
   const { projects, activeProjectId, setActiveProjectId } = useActiveProject()
   const me = useMe()
   const domainsQuery = useAvailableDomains()
@@ -72,8 +74,8 @@ export function ProjectStep() {
   return (
     <div className="card">
       <div className="card-header">
-        <h2>Project &amp; domain</h2>
-        <p>Choose which project you're configuring, or create a new one. Each project belongs to one domain and holds its own metrics, guardrails, and data.</p>
+        <h2>{t('onboarding.steps.project')}</h2>
+        <p>{t('onboarding.project.subtitle')}</p>
       </div>
 
       {projects.length > 0 && (
@@ -91,7 +93,7 @@ export function ProjectStep() {
                 <strong>{p.name}</strong>
                 <div className="text-muted" style={{ fontSize: 12 }}>{p.domain}</div>
               </div>
-              {p.project_id === activeProjectId && <span className="chip chip-accent">Active</span>}
+              {p.project_id === activeProjectId && <span className="chip chip-accent">{t('onboarding.project.active')}</span>}
             </div>
           ))}
         </div>
@@ -99,7 +101,7 @@ export function ProjectStep() {
 
       {!creating && (
         <button type="button" className="btn btn-small" onClick={() => setCreatingManually(true)}>
-          + Create a new project
+          {t('onboarding.project.createNewProject')}
         </button>
       )}
 
@@ -107,20 +109,20 @@ export function ProjectStep() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: projects.length > 0 ? 16 : 0 }}>
           {memberships.length === 0 ? (
             <form onSubmit={handleCreateOrg} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <p className="text-secondary" style={{ fontSize: 12.5 }}>You don't belong to an organization yet -- create one to hold your projects.</p>
+              <p className="text-secondary" style={{ fontSize: 12.5 }}>{t('onboarding.project.noOrgYet')}</p>
               <label className="field">
-                <span>Organization name</span>
+                <span>{t('onboarding.project.orgName')}</span>
                 <input value={orgName} onChange={(e) => setOrgName(e.target.value)} required autoFocus />
               </label>
               <button type="submit" className="btn btn-primary" disabled={createOrg.isPending} style={{ alignSelf: 'flex-start' }}>
-                {createOrg.isPending ? 'Creating…' : 'Create organization'}
+                {createOrg.isPending ? t('onboarding.project.creating') : t('onboarding.project.createOrg')}
               </button>
             </form>
           ) : (
             <form onSubmit={handleCreateProject} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {uniqueOrgIds.length > 1 && (
                 <label className="field">
-                  <span>Organization</span>
+                  <span>{t('onboarding.project.organization')}</span>
                   <select value={selectedOrgId} onChange={(e) => setSelectedOrgId(e.target.value)}>
                     {uniqueOrgIds.map((id) => (
                       <option key={id} value={id}>{id.slice(0, 8)}</option>
@@ -129,11 +131,11 @@ export function ProjectStep() {
                 </label>
               )}
               <label className="field">
-                <span>Project name</span>
+                <span>{t('onboarding.project.projectName')}</span>
                 <input value={projectName} onChange={(e) => setProjectName(e.target.value)} required autoFocus />
               </label>
               <label className="field">
-                <span>Domain</span>
+                <span>{t('onboarding.project.domain')}</span>
                 <select value={projectDomain} onChange={(e) => setProjectDomain(e.target.value)}>
                   {(domainsQuery.data ?? []).map((d) => (
                     <option key={d} value={d}>{d}</option>
@@ -142,10 +144,10 @@ export function ProjectStep() {
               </label>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button type="submit" className="btn btn-primary" disabled={createProject.isPending}>
-                  {createProject.isPending ? 'Creating…' : 'Create project'}
+                  {createProject.isPending ? t('onboarding.project.creating') : t('onboarding.project.createProject')}
                 </button>
                 {projects.length > 0 && (
-                  <button type="button" className="btn" onClick={() => setCreatingManually(false)}>Cancel</button>
+                  <button type="button" className="btn" onClick={() => setCreatingManually(false)}>{t('common.cancel')}</button>
                 )}
               </div>
             </form>

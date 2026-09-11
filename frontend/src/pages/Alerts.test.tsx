@@ -1,22 +1,25 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import { Alerts } from './Alerts'
+import type { Alert } from '../api/types'
 import { renderWithProviders } from '../test/renderWithProviders'
 
 const PROJECT = { project_id: 'proj-1', org_id: 'org-1', name: 'Test Project', domain: 'commerce', created_at: '2026-01-01T00:00:00Z' }
 const EXP_ID = 'exp-1234'
 
-const OPEN_ALERT = {
-  alert_id: 'alert-1', domain: 'commerce', experiment_id: EXP_ID, evaluation_id: 'eval-1', rule: 'rollback' as const,
-  severity: 'critical' as const, reason: 'abandonment_rate regressed significantly', related_guardrail: null, related_finding: null,
-  status: 'open' as const, created_at: '2026-06-01T00:00:00Z', acknowledged_at: null,
+const OPEN_ALERT: Alert = {
+  alert_id: 'alert-1', domain: 'commerce', experiment_id: EXP_ID, evaluation_id: 'eval-1', rule: 'rollback',
+  severity: 'critical', reason: 'abandonment_rate regressed significantly', related_guardrail: null, related_finding: null,
+  status: 'open', created_at: '2026-06-01T00:00:00Z', acknowledged_at: null,
 }
 
 // Mutated per-test (before render) rather than re-mocked per-test — a
 // single top-level vi.mock is hoisted above imports, so re-declaring it
 // per test isn't how vitest module mocking works; a shared, reassignable
-// alert object is the simplest way to vary one field across tests.
-let currentAlert = OPEN_ALERT
+// alert object is the simplest way to vary one field across tests. Typed
+// as the real `Alert` shape (not inferred from OPEN_ALERT's literal) so
+// reassigning `status`/`acknowledged_at` to other valid values type-checks.
+let currentAlert: Alert = OPEN_ALERT
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')

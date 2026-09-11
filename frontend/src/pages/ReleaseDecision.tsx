@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useCreateReleaseEvaluation, useReleaseHistory, useReleaseSummary } from '../api/hooks'
 import { ApiError } from '../api/client'
 import type { DataQualityStatus, ReleaseVerdict } from '../api/types'
@@ -15,6 +16,12 @@ const VERDICT_CLASS: Record<ReleaseVerdict, string> = {
   ROLLBACK: 'chip-negative',
 }
 
+const VERDICT_HERO_BG: Record<ReleaseVerdict, string> = {
+  SHIP: 'linear-gradient(135deg, var(--color-positive-weak) 0%, var(--color-bg) 100%)',
+  HOLD: 'linear-gradient(135deg, var(--color-warning-weak) 0%, var(--color-bg) 100%)',
+  ROLLBACK: 'linear-gradient(135deg, var(--color-negative-weak) 0%, var(--color-bg) 100%)',
+}
+
 const QUALITY_CLASS: Record<DataQualityStatus, string> = {
   healthy: 'chip-positive',
   warning: 'chip-warning',
@@ -28,6 +35,7 @@ function formatSignedPct(value: number | null): string {
 }
 
 function EvaluateNowButton({ domain, projectId, experimentId }: { domain: string; projectId: string; experimentId: string }) {
+  const { t } = useTranslation()
   const createEvaluation = useCreateReleaseEvaluation(domain, projectId)
   const [errorText, setErrorText] = useState<string | null>(null)
 
@@ -41,11 +49,11 @@ function EvaluateNowButton({ domain, projectId, experimentId }: { domain: string
           setErrorText(null)
           createEvaluation.mutate(
             { experimentId },
-            { onError: (err) => setErrorText(err instanceof ApiError ? err.detail : 'Evaluation failed.') },
+            { onError: (err) => setErrorText(err instanceof ApiError ? err.detail : t('releaseDecision.evaluationFailed')) },
           )
         }}
       >
-        {createEvaluation.isPending ? 'Evaluating…' : 'Evaluate now'}
+        {createEvaluation.isPending ? t('releaseDecision.evaluating') : t('releaseDecision.evaluateNow')}
       </button>
       {errorText && <span className="text-muted" style={{ fontSize: 11.5, maxWidth: 260, textAlign: 'right' }}>{errorText}</span>}
     </div>
@@ -63,6 +71,7 @@ function EvaluateNowButton({ domain, projectId, experimentId }: { domain: string
  * experiment with no prior evaluation was to call the release-evaluations
  * POST endpoint directly, outside the UI entirely. */
 export function ReleaseDecision() {
+  const { t } = useTranslation()
   const { experimentId } = useParams<{ experimentId: string }>()
   const { activeProject } = useActiveProject()
   const domain = activeProject?.domain
@@ -79,12 +88,12 @@ export function ReleaseDecision() {
   // state from this screen.
   const isNotYetEvaluated = error instanceof ApiError && error.status === 404
 
-  if (isLoading) return <div className="page"><LoadingState label="Loading release decision…" /></div>
+  if (isLoading) return <div className="page"><LoadingState label={t('releaseDecision.loading')} /></div>
   if (error && !isNotYetEvaluated) return <div className="page"><ErrorState error={error} /></div>
   if (!data) {
     return (
       <div className="page">
-        <EmptyState>No release evaluation has been run yet for this experiment.</EmptyState>
+        <EmptyState>{t('releaseDecision.noEvaluationYet')}</EmptyState>
         {domain && projectId && experimentId && (
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <EvaluateNowButton domain={domain} projectId={projectId} experimentId={experimentId} />
@@ -99,29 +108,35 @@ export function ReleaseDecision() {
   return (
     <div className="page">
       {/* -- verdict, prominently -- */}
-      <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span className={`chip ${VERDICT_CLASS[decision.verdict]}`} style={{ fontSize: 20, padding: '10px 20px' }}>
-            {decision.verdict}
-          </span>
-          <div>
-            <h1 style={{ marginBottom: 2 }}>{explanation_text}</h1>
-            <p className="text-secondary" style={{ margin: 0 }}>
-              {decision.raw_verdict !== decision.verdict && (
-                <span>Underlying verdict: {decision.raw_verdict} (withheld due to data quality) · </span>
-              )}
-              Confidence: {decision.confidence.replace('_', ' ')}
-            </p>
+      <div className="page-hero" style={{ background: VERDICT_HERO_BG[decision.verdict] }}>
+        {/* Stage 20: kept inside the hero's own bounds -- a rotated
+            decoration positioned to straddle the border edge was
+            observed escaping overflow:hidden clipping in Chromium. */}
+        <div className="deco deco-bar" aria-hidden="true" style={{ width: 110, height: 20, top: 20, right: 14, background: 'var(--color-cyan)', opacity: 0.5 }} />
+        <div className="page-hero-content" style={{ display: 'flex', alignItems: 'flex-end', gap: 20, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+            <span className={`chip chip-verdict ${VERDICT_CLASS[decision.verdict]}`}>
+              {decision.verdict}
+            </span>
+            <div>
+              <h1 style={{ marginBottom: 4, fontSize: 26 }}>{explanation_text}</h1>
+              <p className="text-secondary" style={{ margin: 0 }}>
+                {decision.raw_verdict !== decision.verdict && (
+                  <span>{t('releaseDecision.underlyingVerdict', { verdict: decision.raw_verdict })}</span>
+                )}
+                {t('releaseDecision.confidence', { confidence: decision.confidence.replace('_', ' ') })}
+              </p>
+            </div>
           </div>
+          {domain && projectId && experimentId && <EvaluateNowButton domain={domain} projectId={projectId} experimentId={experimentId} />}
         </div>
-        {domain && projectId && experimentId && <EvaluateNowButton domain={domain} projectId={projectId} experimentId={experimentId} />}
       </div>
 
       {history && history.evaluations.length > 1 && (
         <div className="card">
           <div className="card-header">
-            <h2>Verdict history</h2>
-            <p>Is today's regression new, or has it been persistent across repeated evaluations?</p>
+            <h2>{t('releaseDecision.verdictHistory')}</h2>
+            <p>{t('releaseDecision.verdictHistorySub')}</p>
           </div>
           <ReleaseTrendChart evaluations={history.evaluations} />
         </div>
@@ -131,20 +146,20 @@ export function ReleaseDecision() {
         {/* -- metric change -- */}
         <div className="card">
           <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-            Primary metric
+            {t('releaseDecision.primaryMetric')}
           </div>
           <h3 style={{ marginBottom: 10 }}>{humanizeMetricName(decision.primary_metric)}</h3>
           <div style={{ display: 'flex', gap: 18 }}>
             <div>
-              <div className="text-muted" style={{ fontSize: 11 }}>v1</div>
+              <div className="text-muted" style={{ fontSize: 11 }}>{t('common.v1')}</div>
               <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{decision.primary_metric_v1 !== null ? `${(decision.primary_metric_v1 * 100).toFixed(1)}%` : '—'}</div>
             </div>
             <div>
-              <div className="text-muted" style={{ fontSize: 11 }}>v2</div>
+              <div className="text-muted" style={{ fontSize: 11 }}>{t('common.v2')}</div>
               <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{decision.primary_metric_v2 !== null ? `${(decision.primary_metric_v2 * 100).toFixed(1)}%` : '—'}</div>
             </div>
             <div>
-              <div className="text-muted" style={{ fontSize: 11 }}>delta</div>
+              <div className="text-muted" style={{ fontSize: 11 }}>{t('common.delta')}</div>
               <span className="chip chip-neutral">{formatSignedPct(decision.primary_metric_delta)}</span>
             </div>
           </div>
@@ -154,15 +169,15 @@ export function ReleaseDecision() {
         {/* -- guardrails -- */}
         <div className="card">
           <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-            Guardrails
+            {t('releaseDecision.guardrails')}
           </div>
-          <h3 style={{ marginBottom: 10 }}>{decision.breached_guardrails.length > 0 ? 'Breach detected' : 'All within threshold'}</h3>
-          {decision.breached_guardrails.length === 0 && <p className="text-secondary" style={{ fontSize: 13 }}>No guardrail is currently breached.</p>}
+          <h3 style={{ marginBottom: 10 }}>{decision.breached_guardrails.length > 0 ? t('releaseDecision.breachDetected') : t('releaseDecision.allWithinThreshold')}</h3>
+          {decision.breached_guardrails.length === 0 && <p className="text-secondary" style={{ fontSize: 13 }}>{t('releaseDecision.noGuardrailBreached')}</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {decision.breached_guardrails.map((g) => (
               <div key={String(g.name)} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
                 <span>{String(g.name).replace(/_/g, ' ')}</span>
-                <span className="chip chip-negative" style={{ fontSize: 10.5 }}>{String(g.severity ?? 'breached')}</span>
+                <span className="chip chip-negative" style={{ fontSize: 10.5 }}>{String(g.severity ?? t('releaseDecision.breached'))}</span>
               </div>
             ))}
           </div>
@@ -171,17 +186,17 @@ export function ReleaseDecision() {
         {/* -- economics -- */}
         <div className="card">
           <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-            Economics impact
+            {t('releaseDecision.economicsImpact')}
           </div>
           {economics === null ? (
-            <p className="text-secondary" style={{ fontSize: 13 }}>This domain has no economics configuration.</p>
+            <p className="text-secondary" style={{ fontSize: 13 }}>{t('releaseDecision.noEconomicsConfig')}</p>
           ) : decision.economics_impact === null ? (
-            <p className="text-secondary" style={{ fontSize: 13 }}>Business impact is unavailable (revenue/value data not ingested).</p>
+            <p className="text-secondary" style={{ fontSize: 13 }}>{t('releaseDecision.businessImpactUnavailable')}</p>
           ) : (
             <>
-              <h3 style={{ marginBottom: 6 }}>{decision.economics_impact.toFixed(4)} per session</h3>
+              <h3 style={{ marginBottom: 6 }}>{t('releaseDecision.perSession', { value: decision.economics_impact.toFixed(4) })}</h3>
               <span className={`chip ${decision.economics_impact >= 0 ? 'chip-positive' : 'chip-negative'}`}>
-                {decision.economics_impact >= 0 ? 'Positive' : 'Negative'} impact
+                {decision.economics_impact >= 0 ? t('releaseDecision.positiveImpact') : t('releaseDecision.negativeImpact')}
               </span>
             </>
           )}
@@ -192,20 +207,20 @@ export function ReleaseDecision() {
       <div className="grid-3">
         <div className="card">
           <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-            Data quality
+            {t('releaseDecision.dataQuality')}
           </div>
           <span className={`chip ${QUALITY_CLASS[data_quality_status]}`}>{data_quality_status}</span>
-          {decision.data_quality_gated && <p className="text-secondary" style={{ fontSize: 12.5, marginTop: 8 }}>A SHIP verdict was withheld because project data quality is critical.</p>}
+          {decision.data_quality_gated && <p className="text-secondary" style={{ fontSize: 12.5, marginTop: 8 }}>{t('releaseDecision.shipWithheld')}</p>}
         </div>
         <div className="card">
           <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-            Monitoring window
+            {t('releaseDecision.monitoringWindow')}
           </div>
           {monitoring_window.window_hours === null ? (
-            <p className="text-secondary" style={{ fontSize: 13 }}>Manual evaluation — full history, no time window.</p>
+            <p className="text-secondary" style={{ fontSize: 13 }}>{t('releaseDecision.manualEvaluation')}</p>
           ) : (
             <>
-              <h3 style={{ marginBottom: 4 }}>Last {monitoring_window.window_hours}h</h3>
+              <h3 style={{ marginBottom: 4 }}>{t('releaseDecision.lastHours', { hours: monitoring_window.window_hours })}</h3>
               <p className="text-secondary" style={{ fontSize: 12 }}>
                 {monitoring_window.data_window_start && formatDateTime(monitoring_window.data_window_start)} → {monitoring_window.data_window_end && formatDateTime(monitoring_window.data_window_end)}
               </p>
@@ -216,21 +231,21 @@ export function ReleaseDecision() {
 
       {/* -- why this decision: evidence hierarchy -- */}
       <div className="card">
-        <h2 style={{ marginBottom: 10 }}>Why this decision?</h2>
+        <h2 style={{ marginBottom: 10 }}>{t('releaseDecision.whyThisDecision')}</h2>
         <ol style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 20 }}>
           {evidence_hierarchy.map((item) => (
             <li key={item.rank} style={{ fontSize: 13.5, lineHeight: 1.6 }}>
               {item.summary}
             </li>
           ))}
-          {evidence_hierarchy.length === 0 && <p className="text-secondary">No notable evidence beyond the primary metric itself.</p>}
+          {evidence_hierarchy.length === 0 && <p className="text-secondary">{t('releaseDecision.noEvidence')}</p>}
         </ol>
       </div>
 
       {/* -- top negative segments / findings -- */}
       {findings.length > 0 && (
         <div className="card">
-          <h2 style={{ marginBottom: 10 }}>Significant findings</h2>
+          <h2 style={{ marginBottom: 10 }}>{t('releaseDecision.significantFindings')}</h2>
           {findings.length > 1 && (
             <div style={{ marginBottom: 16 }}>
               <SegmentEffectChart
@@ -246,8 +261,8 @@ export function ReleaseDecision() {
                   <span className="text-muted" style={{ fontSize: 11 }}>p = {formatPValue(f.p_value)}</span>
                 </div>
                 <p className="text-secondary" style={{ fontSize: 12.5, margin: '4px 0' }}>
-                  {f.metric}: v1={f.v1_value !== null ? (f.v1_value * 100).toFixed(1) : '—'}% → v2={f.v2_value !== null ? (f.v2_value * 100).toFixed(1) : '—'}% ({formatSignedPct(f.delta)}), excess contribution {f.excess_contribution?.toFixed(4) ?? '—'}
-                  {f.dominant_failure_mode && <> · mechanism: {f.dominant_failure_mode}</>}
+                  {f.metric}: v1={f.v1_value !== null ? (f.v1_value * 100).toFixed(1) : '—'}% → v2={f.v2_value !== null ? (f.v2_value * 100).toFixed(1) : '—'}% ({formatSignedPct(f.delta)}), {t('releaseDecision.excessContribution', { value: f.excess_contribution?.toFixed(4) ?? '—' })}
+                  {f.dominant_failure_mode && <> · {t('releaseDecision.mechanism', { value: f.dominant_failure_mode })}</>}
                 </p>
                 <p style={{ fontSize: 12.5 }}>{f.next_action}</p>
               </div>
@@ -259,7 +274,7 @@ export function ReleaseDecision() {
       {/* -- representative sessions -- */}
       {representative_sessions.length > 0 && (
         <div className="card">
-          <h2 style={{ marginBottom: 10 }}>Representative sessions</h2>
+          <h2 style={{ marginBottom: 10 }}>{t('releaseDecision.representativeSessions')}</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {representative_sessions.map((s) => (
               <div key={s.session_id} style={{ borderTop: '1px solid var(--color-border)', paddingTop: 10 }}>
@@ -270,8 +285,8 @@ export function ReleaseDecision() {
                   </span>
                 </div>
                 <p className="text-secondary" style={{ fontSize: 12, margin: '4px 0' }}>
-                  Outcome: {s.outcome} · Segment: {humanizeSegmentLabel(s.segment_label)}
-                  {s.detected_mechanisms.length > 0 && <> · Mechanisms: {s.detected_mechanisms.join(', ')}</>}
+                  {t('releaseDecision.outcomeSegment', { outcome: s.outcome, segment: humanizeSegmentLabel(s.segment_label) })}
+                  {s.detected_mechanisms.length > 0 && <> · {t('releaseDecision.mechanisms', { value: s.detected_mechanisms.join(', ') })}</>}
                 </p>
                 <p className="text-muted" style={{ fontSize: 11.5, fontStyle: 'italic' }}>{s.selected_because}</p>
               </div>

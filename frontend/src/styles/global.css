@@ -1,32 +1,116 @@
 :root {
   color-scheme: light;
 
-  --color-bg: #f6f6f8;
+  /* -- brand palette (Stage 20): icy-blue base, violet/cyan/lime accents,
+     inspired by the fal.ai reference but tuned for a B2B analytics tool --
+     see semantic colors below for SHIP/HOLD/ROLLBACK, kept deliberately
+     distinct from these brand colors so a decision verdict is never
+     visually confusable with ordinary UI chrome. */
+  --color-bg: #eaf6ff;
+  --color-bg-deep: #dcefff;
   --color-surface: #ffffff;
-  --color-border: #e1e2e8;
-  --color-border-strong: #c9cbd6;
+  --color-surface-tint: #f4fbff;
+  --color-border: #dbeaf3;
+  --color-border-strong: #b9d7e6;
 
-  --color-text: #14161c;
-  --color-text-secondary: #5a5e6c;
-  --color-text-muted: #8a8d99;
+  --color-text: #0b0d12;
+  --color-text-secondary: #454b5e;
+  /* Stage 20 a11y pass: #7c8698 measured 3.3-3.7:1 against the icy
+     background and white surfaces -- below WCAG AA's 4.5:1 floor for the
+     normal-weight small text (labels, timestamps, kickers) this token is
+     used for everywhere. Darkened until it clears 4.5:1 against both. */
+  --color-text-muted: #667082;
 
-  --color-accent: #3a4bc7;
-  --color-accent-weak: #eceeFB;
+  --color-accent: #7867f5;
+  --color-accent-strong: #6353e0;
+  --color-accent-hover: #4f3bc7;
+  --color-accent-weak: #ece9fe;
+  --color-cyan: #17a9d1;
+  --color-cyan-weak: #e1f6fb;
+  --color-lime: #c8f169;
+  --color-lime-ink: #3c5713;
+  --color-lime-weak: #f2fbdd;
 
-  --color-negative: #b3392c;
-  --color-negative-weak: #fbeae8;
-  --color-positive: #1f7a52;
-  --color-positive-weak: #e8f5ef;
-  --color-warning: #b1650a;
-  --color-warning-weak: #fdf1e2;
-  --color-neutral: #6b6f7b;
-  --color-neutral-weak: #eef0f3;
+  /* -- semantic status colors: SHIP / HOLD / ROLLBACK / warning /
+     informational / neutral. Never reused for brand emphasis, and never
+     built from the accent/cyan/lime hues above. Foreground values are
+     darkened from the first pass to clear WCAG AA's 4.5:1 text-contrast
+     floor against their own "-weak" chip background AND the icy page
+     background (chip text is small, ~11.5px bold, which does not
+     qualify for the lower 3:1 "large text" threshold). */
+  --color-positive: #0f7a50;
+  --color-positive-weak: #e0f5ec;
+  --color-warning: #a05c05;
+  --color-warning-weak: #fbedd8;
+  --color-negative: #cd282f;
+  --color-negative-weak: #fce7e8;
+  --color-info: #2063d8;
+  --color-info-weak: #e8f0fe;
+  --color-neutral: #5b6478;
+  --color-neutral-weak: #eef1f6;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'Cascadia Code', Consolas, monospace;
 
-  --radius: 6px;
-  --shadow-card: 0 1px 2px rgba(20, 22, 28, 0.06);
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --shadow-card: 0 1px 2px rgba(20, 30, 50, 0.05), 0 1px 1px rgba(20, 30, 50, 0.04);
+  --shadow-raised: 0 8px 24px rgba(45, 30, 110, 0.10), 0 2px 6px rgba(45, 30, 110, 0.06);
+  --shadow-focus: 0 0 0 3px var(--color-accent-weak);
+}
+
+/* ============================= Dark theme =============================
+   Applied via a `data-theme` attribute on <html>, set by ThemeContext
+   (state/ThemeContext.tsx) -- "light"/"dark" always set explicitly once
+   the user (or their OS preference, on first visit) has been resolved,
+   so this block, not a bare prefers-color-scheme query, is the single
+   source of truth. Every foreground/background pair below was checked
+   against WCAG AA's 4.5:1 text-contrast floor the same way the light
+   palette was (see the a11y-pass comments above) -- dark surfaces need
+   brighter, more saturated foregrounds than their light-mode counterparts
+   to clear the same bar. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-bg: #0d0f1c;
+  --color-bg-deep: #090a14;
+  --color-surface: #171929;
+  --color-surface-tint: #1c1f33;
+  --color-border: #262a42;
+  --color-border-strong: #363b5c;
+
+  --color-text: #eef0f7;
+  --color-text-secondary: #b7bcd4;
+  --color-text-muted: #8990ac;
+
+  --color-accent: #8c7cf5;
+  --color-accent-strong: #6d5def;
+  --color-accent-hover: #5b4cd6;
+  --color-accent-weak: #241f47;
+  --color-cyan: #4fd8f5;
+  --color-cyan-weak: #103543;
+  --color-lime: #c8f169;
+  --color-lime-ink: #d5f27a;
+  --color-lime-weak: #26340f;
+
+  --color-positive: #4ade80;
+  --color-positive-weak: #103322;
+  --color-warning: #fbbf24;
+  --color-warning-weak: #3a2a0a;
+  --color-negative: #f87171;
+  --color-negative-weak: #3a1418;
+  --color-info: #7aa8fb;
+  --color-info-weak: #10213f;
+  --color-neutral: #a3aac5;
+  --color-neutral-weak: #1e2136;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 1px rgba(0, 0, 0, 0.24);
+  --shadow-raised: 0 8px 28px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-focus: 0 0 0 3px var(--color-accent-weak);
 }
 
 * {
@@ -50,13 +134,14 @@ body {
 
 h1, h2, h3, h4 {
   margin: 0;
+  font-family: var(--font-display);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
-h1 { font-size: 22px; }
-h2 { font-size: 17px; }
-h3 { font-size: 14px; }
+h1 { font-size: 26px; font-weight: 700; }
+h2 { font-size: 18px; font-weight: 600; }
+h3 { font-size: 14.5px; font-weight: 600; }
 
 p {
   margin: 0;
@@ -71,15 +156,27 @@ button {
   font-size: inherit;
 }
 
+input, select, textarea {
+  font-family: inherit;
+  color: var(--color-text);
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
 }
 
+::selection {
+  background: var(--color-accent-weak);
+}
+
+/* ============================= App shell ============================= */
+
 .app-shell {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 232px 1fr;
   min-height: 100vh;
+  background: var(--color-bg);
 }
 
 .sidebar {
@@ -88,14 +185,57 @@ table {
   padding: 20px 14px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 22px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 3px;
+  height: 100%;
+  background: linear-gradient(180deg, var(--color-accent) 0%, var(--color-cyan) 55%, var(--color-lime) 100%);
+  opacity: 0.9;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 8px;
+}
+
+.brand-glyph {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-cyan) 100%);
+  position: relative;
+}
+
+.brand-glyph::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--color-lime);
 }
 
 .sidebar-brand {
-  font-size: 14px;
+  font-family: var(--font-display);
+  font-size: 14.5px;
   font-weight: 700;
   color: var(--color-text);
-  padding: 0 8px;
+  line-height: 1.15;
 }
 
 .sidebar-brand-sub {
@@ -113,28 +253,46 @@ table {
 }
 
 .sidebar-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 10px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   text-decoration: none;
   font-size: 13px;
   font-weight: 500;
+  position: relative;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .sidebar-link:hover {
-  background: var(--color-neutral-weak);
+  background: var(--color-surface-tint);
   color: var(--color-text);
 }
 
 .sidebar-link.active {
   background: var(--color-accent-weak);
-  color: var(--color-accent);
+  color: var(--color-accent-strong);
+  font-weight: 600;
+}
+
+.sidebar-link.active::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
 }
 
 .sidebar-link-disabled {
   color: var(--color-text-muted);
   cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .sidebar-link-disabled:hover {
@@ -145,7 +303,10 @@ table {
 .sidebar-link:focus-visible,
 button:focus-visible,
 a:focus-visible,
-[tabindex]:focus-visible {
+[tabindex]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
@@ -157,13 +318,13 @@ a:focus-visible,
 }
 
 .top-bar {
-  height: 52px;
+  height: 56px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 26px;
   gap: 16px;
 }
 
@@ -180,8 +341,12 @@ a:focus-visible,
   font-weight: 600;
 }
 
+.page-outlet {
+  background: var(--color-bg);
+}
+
 .page {
-  padding: 28px 32px 60px;
+  padding: 32px 36px 64px;
   max-width: 1180px;
   width: 100%;
   margin: 0 auto;
@@ -189,6 +354,57 @@ a:focus-visible,
   flex-direction: column;
   gap: 24px;
 }
+
+/* ============================= Page hero ============================= */
+
+/* Stage 20: the oversized editorial header used on flagship/entry
+   screens (Overview, Release Decision, Investigation, Login, project
+   picker, onboarding). Decorative shapes are absolutely positioned,
+   aria-hidden, and pointer-events:none, so they never compete with or
+   obstruct real content or keyboard/focus order. */
+.page-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 30px 32px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--color-bg-deep) 0%, var(--color-bg) 100%);
+  border: 1px solid var(--color-border);
+}
+
+.page-hero-content {
+  position: relative;
+  z-index: 1;
+}
+
+.page-hero h1 {
+  font-size: 34px;
+  line-height: 1.05;
+}
+
+.deco {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.deco-blob {
+  border-radius: 46% 54% 61% 39% / 44% 47% 53% 56%;
+  opacity: 0.7;
+}
+
+.deco-bar {
+  border-radius: var(--radius-pill);
+  transform: rotate(-18deg);
+}
+
+.deco-pixels {
+  background-image: radial-gradient(circle, currentColor 1.6px, transparent 1.7px);
+  background-size: 9px 9px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 60% at 50% 50%, black 55%, transparent 100%);
+  mask-image: radial-gradient(ellipse 60% 60% at 50% 50%, black 55%, transparent 100%);
+}
+
+/* ============================= Cards ============================= */
 
 .card {
   background: var(--color-surface);
@@ -211,6 +427,15 @@ a:focus-visible,
   font-size: 12.5px;
 }
 
+.card-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
 .grid-3 {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -223,14 +448,16 @@ a:focus-visible,
   gap: 16px;
 }
 
+/* ============================= Chips / badges ============================= */
+
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 9px;
-  border-radius: 999px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.01em;
   white-space: nowrap;
 }
@@ -239,14 +466,29 @@ a:focus-visible,
 .chip-positive { background: var(--color-positive-weak); color: var(--color-positive); }
 .chip-warning { background: var(--color-warning-weak); color: var(--color-warning); }
 .chip-neutral { background: var(--color-neutral-weak); color: var(--color-neutral); }
-.chip-accent { background: var(--color-accent-weak); color: var(--color-accent); }
+.chip-accent { background: var(--color-accent-weak); color: var(--color-accent-strong); }
+.chip-info { background: var(--color-info-weak); color: var(--color-info); }
+.chip-lime { background: var(--color-lime-weak); color: var(--color-lime-ink); }
+
+/* A large verdict chip (Release Decision hero) -- same semantics, bigger
+   type, used sparingly and only where the verdict IS the headline. */
+.chip-verdict {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  padding: 12px 22px;
+  border-radius: var(--radius);
+  letter-spacing: 0.01em;
+}
+
+/* ============================= Buttons ============================= */
 
 .btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
-  border-radius: var(--radius);
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border-strong);
   background: var(--color-surface);
   color: var(--color-text);
@@ -254,26 +496,56 @@ a:focus-visible,
   font-size: 13px;
   cursor: pointer;
   text-decoration: none;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.06s ease;
 }
 
 .btn:hover {
-  background: var(--color-neutral-weak);
+  background: var(--color-surface-tint);
+  border-color: var(--color-border-strong);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .btn-primary {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
+  /* Stage 20 a11y pass: white text on the raw --color-accent measured
+     4.15:1, under WCAG AA's 4.5:1 floor for this button's ~13px bold
+     label -- accent-strong clears 5.46:1 while staying clearly "the
+     violet button." */
+  background: var(--color-accent-strong);
+  border-color: var(--color-accent-strong);
   color: white;
+  box-shadow: 0 2px 8px rgba(120, 103, 245, 0.28);
 }
 
 .btn-primary:hover {
-  background: #2f3fb0;
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.btn-secondary {
+  background: var(--color-cyan-weak);
+  border-color: var(--color-cyan);
+  color: #0d6f8a;
+}
+
+.btn-secondary:hover {
+  background: #d3f1f8;
 }
 
 .btn-small {
-  padding: 4px 10px;
+  padding: 5px 11px;
   font-size: 12px;
+  border-radius: var(--radius-sm);
 }
+
+/* ============================= Tabs ============================= */
 
 .tabs {
   display: flex;
@@ -290,16 +562,24 @@ a:focus-visible,
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: color 0.12s ease, background 0.12s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab.active {
-  color: var(--color-accent);
+  color: var(--color-accent-strong);
   border-bottom-color: var(--color-accent);
+  background: var(--color-accent-weak);
 }
 
 .tab:hover:not(.active) {
   color: var(--color-text);
+  background: var(--color-surface-tint);
 }
+
+/* ============================= Text utilities ============================= */
 
 .text-muted {
   color: var(--color-text-muted);
@@ -312,18 +592,136 @@ a:focus-visible,
 .mono {
   font-family: var(--font-mono);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
+/* ============================= Loading / error / empty states ============================= */
+
+/* Stage 20: every loading/error/empty state across the app renders
+   through this one class (LoadingState/ErrorState/EmptyState in
+   components/common/States.tsx), almost always as the sole content of
+   an otherwise-empty `.page` -- giving it its own card-like boundary
+   here is what keeps a 404 or an empty filter result from reading as
+   broken/unstyled bare text floating on the background. */
 .state-box {
-  padding: 32px;
+  padding: 40px 28px;
   text-align: center;
   color: var(--color-text-secondary);
   font-size: 13px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  max-width: 480px;
+  margin: 24px auto;
 }
 
 .state-box.error {
   color: var(--color-negative);
 }
+
+.state-icon {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 12px;
+  border-radius: 12px;
+  position: relative;
+}
+
+.state-icon.empty {
+  background: var(--color-accent-weak);
+}
+
+.state-icon.empty::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  border-radius: 4px;
+  border: 2px solid var(--color-accent);
+}
+
+.state-icon.error {
+  background: var(--color-negative-weak);
+}
+
+.state-icon.error::after {
+  content: '!';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -55%);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--color-negative);
+}
+
+.skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.skeleton-bar {
+  height: 10px;
+  width: 70%;
+  max-width: 220px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--color-neutral-weak) 25%, var(--color-border) 37%, var(--color-neutral-weak) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+.skeleton-bar:nth-child(2) { width: 45%; }
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar { animation: none; }
+}
+
+.empty-glyph {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 12px;
+  border-radius: 12px;
+  background: var(--color-accent-weak);
+  position: relative;
+}
+
+.empty-glyph::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  border-radius: 4px;
+  border: 2px solid var(--color-accent);
+}
+
+/* ============================= Alerts / banners ============================= */
+
+.alert-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-warning);
+  background: var(--color-warning-weak);
+}
+
+/* ============================= Tables ============================= */
 
 table.data-table {
   font-size: 13px;
@@ -331,18 +729,18 @@ table.data-table {
 
 table.data-table th {
   text-align: left;
-  padding: 8px 10px;
+  padding: 10px 12px;
   color: var(--color-text-muted);
-  font-weight: 600;
-  font-size: 11.5px;
+  font-weight: 700;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.05em;
   border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
 }
 
 table.data-table td {
-  padding: 9px 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
 }
@@ -353,10 +751,11 @@ table.data-table tr:last-child td {
 
 table.data-table tr.clickable {
   cursor: pointer;
+  transition: background 0.1s ease;
 }
 
 table.data-table tr.clickable:hover {
-  background: var(--color-neutral-weak);
+  background: var(--color-surface-tint);
 }
 
 /* Stage 18 task 2: the review queue's high-impact rows (connected to a
@@ -370,7 +769,117 @@ table.data-table tr.row-highlight {
   overflow-x: auto;
 }
 
-/* Stage 15: onboarding wizard + project overview */
+/* ============================= Theme toggle ============================= */
+
+.theme-toggle {
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+  line-height: 0;
+}
+
+.theme-toggle-track {
+  display: inline-flex;
+  align-items: center;
+  width: 40px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-strong);
+  padding: 2px;
+  transition: background 0.15s ease;
+}
+
+.theme-toggle[aria-checked='true'] .theme-toggle-track {
+  background: var(--color-accent);
+}
+
+.theme-toggle-knob {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transform: translateX(0);
+  transition: transform 0.15s ease;
+}
+
+.theme-toggle[aria-checked='true'] .theme-toggle-knob {
+  transform: translateX(18px);
+}
+
+/* ============================= Language toggle ============================= */
+
+.lang-toggle {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-tint);
+  border: 1px solid var(--color-border);
+  gap: 2px;
+}
+
+.lang-toggle-option {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 4px 9px;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.lang-toggle-option.active {
+  background: var(--color-accent);
+  color: white;
+}
+
+.lang-toggle-option:hover:not(.active) {
+  color: var(--color-text);
+}
+
+/* ============================= Tooltips ============================= */
+
+/* Stage 20 design system: a pure-CSS tooltip primitive for short,
+   non-essential supplementary text -- put the visible label on
+   `data-tooltip` (kept as a plain string, never JSX) and the essential
+   information in ordinary content nearby, since the tooltip itself is
+   not reachable by assistive tech. */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: var(--color-text);
+  color: white;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 5px 9px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 20;
+}
+
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ============================= Forms / fields ============================= */
 
 .field {
   display: flex;
@@ -385,14 +894,26 @@ table.data-table tr.row-highlight {
 
 .field input,
 .field select,
-.field textarea {
+.field textarea,
+input,
+select,
+textarea {
   font-family: inherit;
   font-size: 13px;
-  padding: 7px 9px;
+  padding: 8px 10px;
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--color-surface);
   color: var(--color-text);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-focus);
 }
 
 .field textarea {
@@ -407,9 +928,11 @@ table.data-table tr.row-highlight {
   font-size: 13px;
 }
 
+/* ============================= Onboarding ============================= */
+
 .onboarding-layout {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: 210px 1fr;
   gap: 24px;
   align-items: start;
 }
@@ -427,7 +950,7 @@ table.data-table tr.row-highlight {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text-secondary);
@@ -436,20 +959,22 @@ table.data-table tr.row-highlight {
   background: none;
   text-align: left;
   width: 100%;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .step-item:hover {
-  background: var(--color-neutral-weak);
+  background: var(--color-surface-tint);
 }
 
 .step-item.active {
   background: var(--color-accent-weak);
-  color: var(--color-accent);
+  color: var(--color-accent-strong);
+  font-weight: 600;
 }
 
 .step-marker {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -462,8 +987,8 @@ table.data-table tr.row-highlight {
 }
 
 .step-marker.done {
-  background: var(--color-positive-weak);
-  color: var(--color-positive);
+  background: var(--color-positive);
+  color: white;
 }
 
 .status-grid {
@@ -492,7 +1017,7 @@ table.data-table tr.row-highlight {
 .status-group li {
   font-size: 12.5px;
   padding: 6px 8px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--color-neutral-weak);
   color: var(--color-text-secondary);
 }
@@ -502,19 +1027,25 @@ table.data-table tr.row-highlight {
 .status-group.missing li { background: var(--color-warning-weak); color: var(--color-warning); }
 .status-group.optional li { background: var(--color-neutral-weak); color: var(--color-text-secondary); }
 
+/* ============================= Selectable cards / pickers ============================= */
+
 .selectable-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
-  border: 1px solid var(--color-border);
+  padding: 14px 16px;
+  border: 1.5px solid var(--color-border);
   border-radius: var(--radius);
   cursor: pointer;
   gap: 12px;
+  background: var(--color-surface);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.06s ease;
 }
 
 .selectable-card:hover {
-  border-color: var(--color-border-strong);
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-raised);
+  transform: translateY(-1px);
 }
 
 .selectable-card.selected {
@@ -527,6 +1058,8 @@ table.data-table tr.row-highlight {
   flex-direction: column;
   gap: 8px;
 }
+
+/* ============================= Project switcher ============================= */
 
 .project-switcher {
   margin-top: auto;
@@ -541,14 +1074,15 @@ table.data-table tr.row-highlight {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  color: var(--color-text-muted);
 }
 
 .project-switcher select {
   font-family: inherit;
   font-size: 12.5px;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--color-surface);
   color: var(--color-text);
 }
@@ -556,9 +1090,9 @@ table.data-table tr.row-highlight {
 .filter-input {
   font-family: inherit;
   font-size: 12.5px;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--color-surface);
   color: var(--color-text);
 }

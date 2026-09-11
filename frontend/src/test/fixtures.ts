@@ -239,6 +239,53 @@ export const GENERIC_AI_QUALITY_FIXTURE: GenericAIQualitySummaryResponse = {
   trajectory_patterns: [
     { pattern: 'exact:understand_query>search>recommend', n_sessions_v1: 4000, n_sessions_v2: 3900, negative_outcome_rate_v1: 0.15, negative_outcome_rate_v2: 0.16 },
   ],
+  human_review_quality: {
+    overall: { reviewed_count: 12, confirmed_count: 9, rejected_count: 3, corrected_count: 2, confirmation_rate: 0.75, correction_rate: 1 / 6, sample_status: 'enough_data' },
+    by_mechanism: [
+      {
+        failure_mode: 'unnecessary_clarification', detector_source: 'mock_llm',
+        counts: { reviewed_count: 10, confirmed_count: 8, rejected_count: 2, corrected_count: 1, confirmation_rate: 0.8, correction_rate: 0.1, sample_status: 'enough_data' },
+      },
+      {
+        failure_mode: 'retrieval_failure', detector_source: 'deterministic',
+        counts: { reviewed_count: 2, confirmed_count: 1, rejected_count: 1, corrected_count: 1, confirmation_rate: 0.5, correction_rate: 0.5, sample_status: 'insufficient_review_data' },
+      },
+    ],
+    by_detector_source: [
+      { detector_source: 'mock_llm', counts: { reviewed_count: 10, confirmed_count: 8, rejected_count: 2, corrected_count: 1, confirmation_rate: 0.8, correction_rate: 0.1, sample_status: 'enough_data' } },
+      { detector_source: 'deterministic', counts: { reviewed_count: 2, confirmed_count: 1, rejected_count: 1, corrected_count: 1, confirmation_rate: 0.5, correction_rate: 0.5, sample_status: 'insufficient_review_data' } },
+    ],
+    by_confidence_bucket: [
+      { bucket_label: '0.0-0.5', bucket_min: 0.0, bucket_max: 0.5, counts: { reviewed_count: 0, confirmed_count: 0, rejected_count: 0, corrected_count: 0, confirmation_rate: null, correction_rate: null, sample_status: 'insufficient_review_data' } },
+      { bucket_label: '0.5-0.7', bucket_min: 0.5, bucket_max: 0.7, counts: { reviewed_count: 2, confirmed_count: 1, rejected_count: 1, corrected_count: 0, confirmation_rate: 0.5, correction_rate: 0.0, sample_status: 'insufficient_review_data' } },
+      { bucket_label: '0.7-0.9', bucket_min: 0.7, bucket_max: 0.9, counts: { reviewed_count: 4, confirmed_count: 3, rejected_count: 1, corrected_count: 1, confirmation_rate: 0.75, correction_rate: 0.25, sample_status: 'insufficient_review_data' } },
+      { bucket_label: '0.9-1.0', bucket_min: 0.9, bucket_max: 1.0, counts: { reviewed_count: 6, confirmed_count: 5, rejected_count: 1, corrected_count: 1, confirmation_rate: 0.833, correction_rate: 0.167, sample_status: 'insufficient_review_data' } },
+    ],
+    by_version: [
+      {
+        detector_version: 'rule_based_mock-v1', provider: null, model: null, prompt_version: null,
+        first_seen: '2026-01-01T00:00:00Z', last_seen: '2026-01-10T00:00:00Z',
+        counts: { reviewed_count: 10, confirmed_count: 8, rejected_count: 2, corrected_count: 1, confirmation_rate: 0.8, correction_rate: 0.1, sample_status: 'enough_data' },
+      },
+      {
+        detector_version: 'rule_based_mock-v2', provider: null, model: null, prompt_version: null,
+        first_seen: '2026-02-01T00:00:00Z', last_seen: '2026-02-02T00:00:00Z',
+        counts: { reviewed_count: 2, confirmed_count: 1, rejected_count: 1, corrected_count: 1, confirmation_rate: 0.5, correction_rate: 0.5, sample_status: 'insufficient_review_data' },
+      },
+    ],
+    disagreement_items: [
+      {
+        session_id: 'sess-0001-aaaa-bbbb-cccc-000000000001', experiment_id: EXPERIMENT_ID, original_mechanism: 'unnecessary_clarification',
+        corrected_mechanism: 'wrong_tool_selection', original_confidence: 0.6, detector_source: 'mock_llm',
+        detector_version: 'rule_based_mock-v1', provider: null, model: null, prompt_version: null,
+        reviewed_at: '2026-01-05T00:00:00Z',
+      },
+    ],
+    confusion_pairs: [
+      { original_mechanism: 'unnecessary_clarification', corrected_mechanism: 'wrong_tool_selection', count: 2 },
+    ],
+    min_reviews_threshold: 10,
+  },
 }
 
 export const CLASSIFIER_EVALUATION_FIXTURE: ClassifierEvaluationResponse = {
@@ -292,6 +339,8 @@ export const GENERIC_SESSION_DETAIL_FIXTURE: GenericSessionDetailResponse = {
       failure_mode: 'unnecessary_clarification', detector_source: 'mock_llm', confidence: 0.9,
       evidence_text: 'Agent asked a clarifying question despite sufficient constraints.',
       review_status: 'unreviewed', corrected_mechanism: null, review_note: null,
+      detector_version: 'rule_based_mock-v1', provider: null, model: null, prompt_version: null,
+      reviewer: null, reviewed_at: null,
     },
   ],
 }

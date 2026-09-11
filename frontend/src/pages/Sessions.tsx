@@ -1,4 +1,5 @@
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useDomainMechanisms, useDomainSessions, useSegmentDimensions } from '../api/hooks'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
 import { formatDateTime } from '../lib/format'
@@ -42,6 +43,7 @@ function fromDayBoundary(value: string): string {
  * dimensions come entirely from GET .../segment-dimensions -- this file
  * never lists a dimension or outcome value by name. */
 export function Sessions() {
+  const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const { activeProject } = useActiveProject()
@@ -118,67 +120,67 @@ export function Sessions() {
   return (
     <div className="page">
       <div>
-        <h1>Sessions</h1>
-        <p className="text-secondary">Drill from a statistical finding into concrete session examples.</p>
+        <h1>{t('sessions.title')}</h1>
+        <p className="text-secondary">{t('sessions.subtitle')}</p>
       </div>
 
       <div className="card">
         <div className="card-header">
-          <h2>Filters</h2>
+          <h2>{t('sessions.filters')}</h2>
           {activeFilterEntries.length > 0 && (
-            <button type="button" className="btn btn-small" onClick={clearFilters}>Clear all ({activeFilterEntries.length})</button>
+            <button type="button" className="btn btn-small" onClick={clearFilters}>{t('sessions.clearAll', { count: activeFilterEntries.length })}</button>
           )}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-            <span className="text-muted">Agent version</span>
+            <span className="text-muted">{t('sessions.agentVersion')}</span>
             <select className="filter-input" value={agentVersion ?? ''} onChange={(e) => updateFilter('agent_version', e.target.value)}>
-              <option value="">Any</option>
+              <option value="">{t('sessions.any')}</option>
               <option value="v1">v1</option>
               <option value="v2">v2</option>
             </select>
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-            <span className="text-muted">Outcome</span>
+            <span className="text-muted">{t('sessions.outcome')}</span>
             <input
               type="text"
               className="filter-input"
               value={outcome}
-              placeholder="Any"
+              placeholder={t('sessions.any')}
               onChange={(e) => updateFilter('outcome', e.target.value)}
               style={{ width: 120 }}
             />
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-            <span className="text-muted">Started after</span>
+            <span className="text-muted">{t('sessions.startedAfter')}</span>
             <input type="date" className="filter-input" value={startedAfter ? fromDayBoundary(startedAfter) : ''} onChange={(e) => updateFilter('started_after', e.target.value)} />
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-            <span className="text-muted">Started before</span>
+            <span className="text-muted">{t('sessions.startedBefore')}</span>
             <input type="date" className="filter-input" value={startedBefore ? fromDayBoundary(startedBefore) : ''} onChange={(e) => updateFilter('started_before', e.target.value)} />
           </label>
 
           {mechanisms.length > 0 && (
             <>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-                <span className="text-muted">Detected mechanism</span>
+                <span className="text-muted">{t('sessions.detectedMechanism')}</span>
                 <select className="filter-input" value={detectedMechanism} onChange={(e) => updateFilter('detected_mechanism', e.target.value)}>
-                  <option value="">Any</option>
+                  <option value="">{t('sessions.any')}</option>
                   {mechanisms.map((m) => (
                     <option key={m.name} value={m.name}>{m.name.replace(/_/g, ' ')}</option>
                   ))}
                 </select>
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-                <span className="text-muted">Review status</span>
+                <span className="text-muted">{t('sessions.reviewStatus')}</span>
                 <select className="filter-input" value={reviewStatus} onChange={(e) => updateFilter('review_status', e.target.value)}>
-                  <option value="">Any</option>
-                  <option value="unreviewed">Unreviewed</option>
-                  <option value="confirmed">Confirmed</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="mixed">Mixed</option>
+                  <option value="">{t('sessions.any')}</option>
+                  <option value="unreviewed">{t('sessions.unreviewed')}</option>
+                  <option value="confirmed">{t('sessions.confirmed')}</option>
+                  <option value="rejected">{t('sessions.rejected')}</option>
+                  <option value="mixed">{t('sessions.mixed')}</option>
                 </select>
               </label>
             </>
@@ -201,7 +203,7 @@ export function Sessions() {
               {k.replace(/_/g, ' ')}: {v}
               <button
                 type="button"
-                aria-label={`Remove ${k} filter`}
+                aria-label={t('sessions.removeFilter', { key: k })}
                 onClick={() => updateFilter(k, '')}
                 style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700, padding: 0, lineHeight: 1 }}
               >
@@ -213,24 +215,24 @@ export function Sessions() {
       </div>
 
       <div className="card">
-        {isLoading && <LoadingState label="Loading sessions…" />}
+        {isLoading && <LoadingState label={t('sessions.loadingSessions')} />}
         {error && <ErrorState error={error} />}
-        {data && data.items.length === 0 && <EmptyState>No sessions match these filters.</EmptyState>}
+        {data && data.items.length === 0 && <EmptyState>{t('sessions.noSessionsMatch')}</EmptyState>}
         {data && data.items.length > 0 && (
           <>
             <p className="text-secondary" style={{ marginBottom: 12, fontSize: 12.5 }}>
-              {data.total.toLocaleString('en-US')} sessions match · showing {offset + 1}-{Math.min(offset + PAGE_SIZE, data.total)}
+              {t('sessions.sessionsMatch', { total: data.total.toLocaleString('en-US'), from: offset + 1, to: Math.min(offset + PAGE_SIZE, data.total) })}
             </p>
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Session</th>
-                    <th>Version</th>
-                    <th>Outcome</th>
-                    {mechanisms.length > 0 && <th>Mechanisms</th>}
-                    {mechanisms.length > 0 && <th>Review</th>}
-                    <th>Started</th>
+                    <th>{t('sessions.session')}</th>
+                    <th>{t('sessions.version')}</th>
+                    <th>{t('sessions.outcome')}</th>
+                    {mechanisms.length > 0 && <th>{t('sessions.mechanisms')}</th>}
+                    {mechanisms.length > 0 && <th>{t('sessions.review')}</th>}
+                    <th>{t('sessions.started')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -241,7 +243,7 @@ export function Sessions() {
                       onClick={() => navigate(`/sessions/${s.session_id}`)}
                       role="button"
                       tabIndex={0}
-                      aria-label={`Open session ${s.session_id.slice(0, 8)}`}
+                      aria-label={t('sessions.openSession', { id: s.session_id.slice(0, 8) })}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
@@ -270,10 +272,10 @@ export function Sessions() {
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
               <button type="button" className="btn btn-small" disabled={offset === 0} onClick={() => goToOffset(Math.max(0, offset - PAGE_SIZE))}>
-                ← Previous
+                {t('sessions.previous')}
               </button>
               <button type="button" className="btn btn-small" disabled={offset + PAGE_SIZE >= data.total} onClick={() => goToOffset(offset + PAGE_SIZE)}>
-                Next →
+                {t('sessions.next')}
               </button>
             </div>
           </>

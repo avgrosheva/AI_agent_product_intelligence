@@ -1,4 +1,6 @@
+import { useTranslation } from 'react-i18next'
 import type { OnboardingStatus } from '../../api/types'
+import { i18n } from '../../i18n'
 
 interface StatusGroups {
   blocking: string[]
@@ -16,37 +18,38 @@ interface StatusGroups {
 export function categorizeStatus(status: OnboardingStatus): StatusGroups {
   const groups: StatusGroups = { blocking: [], configured: [], missing: [], optional: [] }
 
-  if (status.ingestion_connected) groups.configured.push('Data ingestion is connected')
-  else groups.blocking.push('No data source is connected yet -- nothing can be analyzed')
+  if (status.ingestion_connected) groups.configured.push(i18n.t('onboarding.status.ingestionConnected'))
+  else groups.blocking.push(i18n.t('onboarding.status.noDataSource'))
 
-  if (status.data_received) groups.configured.push('Sessions have been received')
-  else groups.blocking.push('No sessions have arrived yet')
+  if (status.data_received) groups.configured.push(i18n.t('onboarding.status.sessionsReceived'))
+  else groups.blocking.push(i18n.t('onboarding.status.noSessions'))
 
-  if (status.primary_metric_configured) groups.configured.push('A primary metric is set')
-  else groups.blocking.push('No primary metric is set -- release decisions cannot be evaluated')
+  if (status.primary_metric_configured) groups.configured.push(i18n.t('onboarding.status.primaryMetricSet'))
+  else groups.blocking.push(i18n.t('onboarding.status.noPrimaryMetric'))
 
-  if (status.guardrails_configured) groups.configured.push('At least one guardrail is active')
-  else groups.missing.push('No guardrails are configured -- risky changes could ship unflagged')
+  if (status.guardrails_configured) groups.configured.push(i18n.t('onboarding.status.guardrailActive'))
+  else groups.missing.push(i18n.t('onboarding.status.noGuardrails'))
 
-  if (status.data_quality_status === 'healthy') groups.configured.push('Data quality looks healthy')
-  else if (status.data_quality_status === 'critical') groups.blocking.push('Data quality is critical -- ship decisions are being held automatically')
-  else if (status.data_quality_status === 'warning') groups.missing.push('Data quality has warnings worth reviewing')
+  if (status.data_quality_status === 'healthy') groups.configured.push(i18n.t('onboarding.status.dataQualityHealthy'))
+  else if (status.data_quality_status === 'critical') groups.blocking.push(i18n.t('onboarding.status.dataQualityCritical'))
+  else if (status.data_quality_status === 'warning') groups.missing.push(i18n.t('onboarding.status.dataQualityWarning'))
 
-  groups.optional.push(status.monitoring_enabled ? 'Scheduled monitoring is enabled' : 'Scheduled monitoring is not set up')
-  groups.optional.push(status.notifications_configured ? 'Notifications are configured' : 'Notifications are not set up')
+  groups.optional.push(i18n.t(status.monitoring_enabled ? 'onboarding.status.monitoringEnabled' : 'onboarding.status.monitoringNotSetUp'))
+  groups.optional.push(i18n.t(status.notifications_configured ? 'onboarding.status.notificationsConfigured' : 'onboarding.status.notificationsNotSetUp'))
 
   return groups
 }
 
-const GROUP_ORDER: { key: keyof StatusGroups; label: string }[] = [
-  { key: 'blocking', label: 'Blocking' },
-  { key: 'missing', label: 'Missing' },
-  { key: 'configured', label: 'Configured' },
-  { key: 'optional', label: 'Optional' },
+const GROUP_ORDER: { key: keyof StatusGroups; labelKey: string }[] = [
+  { key: 'blocking', labelKey: 'onboarding.status.groupBlocking' },
+  { key: 'missing', labelKey: 'onboarding.status.groupMissing' },
+  { key: 'configured', labelKey: 'onboarding.status.groupConfigured' },
+  { key: 'optional', labelKey: 'onboarding.status.groupOptional' },
 ]
 
 export function StatusPanel({ status, isLoading }: { status: OnboardingStatus | undefined; isLoading: boolean }) {
-  if (isLoading) return <div className="state-box">Loading readiness…</div>
+  const { t } = useTranslation()
+  if (isLoading) return <div className="state-box">{t('onboarding.status.loading')}</div>
   if (!status) return null
 
   const groups = categorizeStatus(status)
@@ -54,15 +57,15 @@ export function StatusPanel({ status, isLoading }: { status: OnboardingStatus | 
   return (
     <div className="card">
       <div className="card-header">
-        <h2>Setup readiness</h2>
-        <p>What's configured, what's missing, and what's actively blocking analysis right now.</p>
+        <h2>{t('onboarding.status.title')}</h2>
+        <p>{t('onboarding.status.subtitle')}</p>
       </div>
       <div className="status-grid">
-        {GROUP_ORDER.map(({ key, label }) => (
+        {GROUP_ORDER.map(({ key, labelKey }) => (
           <div key={key} className={`status-group ${key}`}>
-            <h4>{label}</h4>
+            <h4>{t(labelKey)}</h4>
             {groups[key].length === 0 ? (
-              <p className="text-muted" style={{ fontSize: 12.5 }}>Nothing here</p>
+              <p className="text-muted" style={{ fontSize: 12.5 }}>{t('onboarding.status.nothingHere')}</p>
             ) : (
               <ul>
                 {groups[key].map((line) => (

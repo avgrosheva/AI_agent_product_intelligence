@@ -1,10 +1,16 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ApiError } from '../../api/client'
 
-export function LoadingState({ label = 'Loading…' }: { label?: string }) {
+export function LoadingState({ label }: { label?: string }) {
+  const { t } = useTranslation()
   return (
     <div className="state-box" role="status" aria-live="polite">
-      {label}
+      <div className="skeleton-stack" aria-hidden="true">
+        <div className="skeleton-bar" />
+        <div className="skeleton-bar" />
+      </div>
+      {label ?? t('common.loading')}
     </div>
   )
 }
@@ -16,37 +22,50 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
  * an ApiError, rather than a raw fetch/JS error message. Accepts the raw
  * thrown value (usually an ApiError, from any useDomainX hook's `error`)
  * or a plain string (a couple of contexts stringify their own error
- * before exposing it) so every existing call site keeps working. */
+ * before exposing it) so every existing call site keeps working. The
+ * backend's own `detail` text is never translated -- it's real
+ * diagnostic content, not app chrome. */
 export function ErrorState({ error }: { error: unknown }) {
+  const { t } = useTranslation()
+  const icon = <div className="state-icon error" aria-hidden="true" />
   if (error instanceof ApiError) {
     if (error.status === 401 || error.status === 403) {
       return (
         <div className="state-box error" role="alert">
-          Access denied — {error.detail}
+          {icon}
+          {t('states.accessDenied')} — {error.detail}
         </div>
       )
     }
     if (error.status === 404) {
       return (
         <div className="state-box error" role="alert">
-          Not found — {error.detail}
+          {icon}
+          {t('states.notFound')} — {error.detail}
         </div>
       )
     }
     return (
       <div className="state-box error" role="alert">
-        Request failed — {error.detail}
+        {icon}
+        {t('states.requestFailed')} — {error.detail}
       </div>
     )
   }
   const message = typeof error === 'string' ? error : error instanceof Error ? error.message : 'Unknown error'
   return (
     <div className="state-box error" role="alert">
-      Something went wrong: {message}
+      {icon}
+      {t('states.somethingWentWrong')}: {message}
     </div>
   )
 }
 
 export function EmptyState({ children }: { children: ReactNode }) {
-  return <div className="state-box">{children}</div>
+  return (
+    <div className="state-box">
+      <div className="state-icon empty" aria-hidden="true" />
+      {children}
+    </div>
+  )
 }

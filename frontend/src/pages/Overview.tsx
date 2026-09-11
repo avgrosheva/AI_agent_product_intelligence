@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useDomainGuardrails } from '../api/hooks'
 import { CIRange } from '../components/common/CIRange'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
@@ -10,10 +11,10 @@ import type { MetricResult } from '../api/types'
 import { useActiveExperiment } from '../state/ActiveExperimentContext'
 import { useActiveProject } from '../state/ActiveProjectContext'
 
-const STATUS_META: Record<string, { label: string; cls: string }> = {
-  ambiguous_investigate: { label: 'Requires investigation', cls: 'chip-warning' },
-  no_regression_detected: { label: 'No regression detected', cls: 'chip-positive' },
-  not_yet_investigated: { label: 'Not yet investigated', cls: 'chip-neutral' },
+const STATUS_META: Record<string, { labelKey: string; cls: string }> = {
+  ambiguous_investigate: { labelKey: 'overview.statusRequiresInvestigation', cls: 'chip-warning' },
+  no_regression_detected: { labelKey: 'overview.statusNoRegression', cls: 'chip-positive' },
+  not_yet_investigated: { labelKey: 'overview.statusNotYetInvestigated', cls: 'chip-neutral' },
 }
 
 /** The CI is rendered by default here, not hidden behind a "Detail"
@@ -21,6 +22,7 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
  * Overview screen's whole purpose is "is this a real difference or
  * noise" at a glance, and a delta chip alone can't answer that. */
 function SignalCard({ kicker, metric }: { kicker: string; metric: MetricResult }) {
+  const { t } = useTranslation()
   const v1 = metric.cluster_mean_v1
   const v2 = metric.cluster_mean_v2
   const direction = deltaDirection(metric.metric_name, v1, v2)
@@ -33,15 +35,15 @@ function SignalCard({ kicker, metric }: { kicker: string; metric: MetricResult }
       <h3 style={{ marginBottom: 10 }}>{humanizeMetricName(metric.metric_name)}</h3>
       <div style={{ display: 'flex', gap: 18, marginBottom: 10 }}>
         <div>
-          <div className="text-muted" style={{ fontSize: 11 }}>v1</div>
+          <div className="text-muted" style={{ fontSize: 11 }}>{t('common.v1')}</div>
           <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{formatMetricValue(metric.metric_name, v1)}</div>
         </div>
         <div>
-          <div className="text-muted" style={{ fontSize: 11 }}>v2</div>
+          <div className="text-muted" style={{ fontSize: 11 }}>{t('common.v2')}</div>
           <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{formatMetricValue(metric.metric_name, v2)}</div>
         </div>
         <div>
-          <div className="text-muted" style={{ fontSize: 11 }}>delta</div>
+          <div className="text-muted" style={{ fontSize: 11 }}>{t('common.delta')}</div>
           <span className={`chip ${directionCls}`}>{formatDelta(metric.metric_name, v1, v2)}</span>
         </div>
       </div>
@@ -70,59 +72,63 @@ function SignalCard({ kicker, metric }: { kicker: string; metric: MetricResult }
  * directly (no full Investigation run) since Overview is meant to be
  * cheap; the real Investigation only runs when the user clicks Investigate. */
 export function Overview() {
+  const { t } = useTranslation()
   const { activeProject } = useActiveProject()
   const { activeExperimentId, activeExperiment, isLoading: expLoading, error: expError } = useActiveExperiment()
   const domain = activeProject?.domain
   const { data: guardrails, isLoading: guardrailsLoading } = useDomainGuardrails(domain, activeProject?.project_id, activeExperimentId ?? undefined)
 
-  if (expLoading) return <div className="page"><LoadingState label="Loading experiments…" /></div>
+  if (expLoading) return <div className="page"><LoadingState label={t('overview.loadingExperiments')} /></div>
   if (expError) return <div className="page"><ErrorState error={expError} /></div>
-  if (!activeExperiment) return <div className="page"><EmptyState>No experiments found for this project yet.</EmptyState></div>
+  if (!activeExperiment) return <div className="page"><EmptyState>{t('overview.noExperiments')}</EmptyState></div>
 
   const statusMeta = STATUS_META[activeExperiment.status_chip]
   const northStar = activeExperiment.north_star_metric
 
   return (
     <div className="page">
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-          <h1>{activeExperiment.name}</h1>
-          <span className={`chip ${statusMeta.cls}`}>{statusMeta.label}</span>
+      <div className="page-hero">
+        <div className="deco deco-pixels" aria-hidden="true" style={{ width: 150, height: 150, top: -40, right: -30, color: 'var(--color-lime)' }} />
+        <div className="page-hero-content">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 6, flexWrap: 'wrap' }}>
+            <h1>{activeExperiment.name}</h1>
+            <span className={`chip ${statusMeta.cls}`}>{t(statusMeta.labelKey)}</span>
+          </div>
+          <p className="text-secondary">
+            {activeExperiment.control_version} ({t('overview.controlLabel')}) vs {activeExperiment.treatment_version} ({t('overview.treatmentLabel')})
+            {activeExperiment.n_users != null && activeExperiment.n_sessions != null && (
+              <> · {activeExperiment.n_users.toLocaleString('en-US')} {t('common.users')} · {activeExperiment.n_sessions.toLocaleString('en-US')} {t('common.sessions')}</>
+            )}
+          </p>
         </div>
-        <p className="text-secondary">
-          {activeExperiment.control_version} (control) vs {activeExperiment.treatment_version} (treatment)
-          {activeExperiment.n_users != null && activeExperiment.n_sessions != null && (
-            <> · {activeExperiment.n_users.toLocaleString('en-US')} users · {activeExperiment.n_sessions.toLocaleString('en-US')} sessions</>
-          )}
-        </p>
       </div>
 
       {!northStar ? (
         <div className="card">
           <p className="text-secondary">
-            This project doesn't have a primary metric configured yet, so there's no north-star signal to show here.
+            {t('overview.noPrimaryMetric')}
           </p>
           <Link to="/setup" className="btn btn-primary" style={{ marginTop: 10 }}>
-            Configure a primary metric →
+            {t('overview.configurePrimaryMetric')}
           </Link>
         </div>
       ) : (
         <div className="grid-2">
-          <SignalCard kicker="Primary metric · North star" metric={northStar} />
+          <SignalCard kicker={t('overview.primaryMetricKicker')} metric={northStar} />
 
           <div className="card">
-            <h2 style={{ marginBottom: 10 }}>Summary</h2>
+            <h2 style={{ marginBottom: 10 }}>{t('overview.summary')}</h2>
             <p style={{ fontSize: 13.5, lineHeight: 1.7 }}>
               {northStar.verdict === 'significant'
-                ? `${humanizeMetricName(northStar.metric_name)} moved with statistical significance.`
-                : `${humanizeMetricName(northStar.metric_name)} is broadly flat / inconclusive at the aggregate level (not statistically significant).`}{' '}
+                ? t('overview.movedSignificantly', { metric: humanizeMetricName(northStar.metric_name) })
+                : t('overview.flatInconclusive', { metric: humanizeMetricName(northStar.metric_name) })}{' '}
               {guardrails?.any_breach
-                ? `A guardrail is breached (${guardrails.checks.filter((g) => g.breached).map((g) => g.name).join(', ')}), which on its own is enough to block a ship decision regardless of the north star.`
-                : 'No guardrail is currently breached.'}{' '}
-              This is exactly the kind of case that needs segment-level investigation rather than a snap judgment from the aggregate numbers.
+                ? t('overview.guardrailBreachedSummary', { names: guardrails.checks.filter((g) => g.breached).map((g) => g.name).join(', ') })
+                : t('overview.noGuardrailBreached')}{' '}
+              {t('overview.needsSegmentInvestigation')}
             </p>
             <Link to={activeExperimentId ? `/experiments/${activeExperimentId}/investigation` : '#'} className="btn btn-primary" style={{ marginTop: 14 }}>
-              Investigate →
+              {t('overview.investigate')}
             </Link>
           </div>
         </div>
@@ -132,11 +138,11 @@ export function Overview() {
       {guardrails && (
         <div className="card">
           <div className="card-header">
-            <h2>Guardrails</h2>
+            <h2>{t('overview.guardrails')}</h2>
           </div>
-          <h3 style={{ marginBottom: 12 }}>{guardrails.any_breach ? 'Breach detected' : 'All within threshold'}</h3>
+          <h3 style={{ marginBottom: 12 }}>{guardrails.any_breach ? t('overview.breachDetected') : t('overview.allWithinThreshold')}</h3>
           <GuardrailComparisonChart checks={guardrails.checks} />
-          {guardrails.checks.length === 0 && <EmptyState>No guardrails configured.</EmptyState>}
+          {guardrails.checks.length === 0 && <EmptyState>{t('overview.noGuardrailsConfigured')}</EmptyState>}
         </div>
       )}
     </div>

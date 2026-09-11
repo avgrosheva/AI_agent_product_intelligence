@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useDomainMechanisms, useGenericExperiments, useReviewQueue, useSubmitReview, type ReviewQueueFilters } from '../api/hooks'
 import type { ReviewQueueItem } from '../api/types'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
@@ -14,6 +15,7 @@ function ReviewQueueRow({ item, domain, projectId, filters, mechanismNames }: {
   filters: ReviewQueueFilters
   mechanismNames: string[]
 }) {
+  const { t } = useTranslation()
   const [showCorrect, setShowCorrect] = useState(false)
   const [correctedMechanism, setCorrectedMechanism] = useState('')
   const [note, setNote] = useState('')
@@ -25,7 +27,7 @@ function ReviewQueueRow({ item, domain, projectId, filters, mechanismNames }: {
     submit.mutate(
       { sessionId: item.session_id, failureMode: item.failure_mode, decision, correctedMechanism: mechanism, note: note || undefined },
       {
-        onError: (err) => setErrorText(err instanceof Error ? err.message : 'Review submission failed.'),
+        onError: (err) => setErrorText(err instanceof Error ? err.message : t('reviewQueue.reviewSubmissionFailed')),
         onSuccess: () => setShowCorrect(false),
       },
     )
@@ -35,27 +37,34 @@ function ReviewQueueRow({ item, domain, projectId, filters, mechanismNames }: {
     <tr className={item.high_impact ? 'row-highlight' : undefined}>
       <td>
         <Link to={`/sessions/${item.session_id}`} className="mono">{item.session_id.slice(0, 8)}…</Link>
-        {item.high_impact && <div className="chip chip-accent" style={{ marginTop: 4, fontSize: 10 }}>high impact</div>}
+        <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+          {item.high_impact && <span className="chip chip-accent" style={{ fontSize: 10 }}>{t('reviewQueue.highImpact')}</span>}
+          {item.is_newest_version && <span className="chip chip-warning" style={{ fontSize: 10 }} title={t('reviewQueue.newVersionTooltip')}>{t('reviewQueue.newVersion')}</span>}
+        </div>
       </td>
       <td>{item.agent_version}</td>
       <td>{item.failure_mode.replace(/_/g, ' ')}</td>
-      <td className="text-secondary" style={{ fontSize: 11.5 }}>{item.detector_source.replace(/_/g, ' ')}</td>
+      <td className="text-secondary" style={{ fontSize: 11.5 }}>
+        {item.detector_source.replace(/_/g, ' ')}
+        <div className="mono" style={{ fontSize: 10 }}>{item.detector_version}</div>
+        {item.provider && <div style={{ fontSize: 10 }}>{item.provider}/{item.model}</div>}
+      </td>
       <td className="mono">{item.confidence !== null ? `${(item.confidence * 100).toFixed(0)}%` : '—'}</td>
       <td style={{ maxWidth: 260, fontSize: 11.5 }} className="text-secondary">{item.evidence_text ?? '—'}</td>
       <td>
         {item.reviewed ? (
-          <span className="chip chip-positive">reviewed</span>
+          <span className="chip chip-positive">{t('reviewQueue.reviewed')}</span>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', gap: 6 }}>
               <button type="button" className="btn btn-small" disabled={submit.isPending} onClick={() => submitDecision('confirmed')}>
-                Confirm
+                {t('reviewQueue.confirm')}
               </button>
               <button type="button" className="btn btn-small" disabled={submit.isPending} onClick={() => submitDecision('rejected')}>
-                Reject
+                {t('reviewQueue.reject')}
               </button>
               <button type="button" className="btn btn-small" disabled={submit.isPending} onClick={() => setShowCorrect((v) => !v)} aria-expanded={showCorrect}>
-                {showCorrect ? 'Cancel' : 'Correct…'}
+                {showCorrect ? t('reviewQueue.cancel') : t('reviewQueue.correctEllipsis')}
               </button>
             </div>
             {showCorrect && (
@@ -64,9 +73,9 @@ function ReviewQueueRow({ item, domain, projectId, filters, mechanismNames }: {
                   className="filter-input"
                   value={correctedMechanism}
                   onChange={(e) => setCorrectedMechanism(e.target.value)}
-                  aria-label="Corrected mechanism"
+                  aria-label={t('reviewQueue.correctedMechanism')}
                 >
-                  <option value="">-- select the correct mechanism --</option>
+                  <option value="">{t('reviewQueue.selectCorrectMechanism')}</option>
                   {mechanismNames.filter((m) => m !== item.failure_mode).map((m) => (
                     <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>
                   ))}
@@ -74,11 +83,11 @@ function ReviewQueueRow({ item, domain, projectId, filters, mechanismNames }: {
                 <input
                   type="text"
                   className="filter-input"
-                  placeholder="Note (optional)"
+                  placeholder={t('reviewQueue.noteOptional')}
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   style={{ width: 160 }}
-                  aria-label="Review note"
+                  aria-label={t('reviewQueue.reviewNote')}
                 />
                 <button
                   type="button"
@@ -86,7 +95,7 @@ function ReviewQueueRow({ item, domain, projectId, filters, mechanismNames }: {
                   disabled={submit.isPending || !correctedMechanism}
                   onClick={() => submitDecision('rejected', correctedMechanism)}
                 >
-                  Submit correction
+                  {t('reviewQueue.submitCorrection')}
                 </button>
               </div>
             )}
@@ -104,6 +113,7 @@ function ReviewQueueRow({ item, domain, projectId, filters, mechanismNames }: {
  * straight to the session (and its evidence, already shown on
  * SessionDetail) the attribution came from. */
 export function ReviewQueue() {
+  const { t } = useTranslation()
   const { activeProject } = useActiveProject()
   const domain = activeProject?.domain
   const projectId = activeProject?.project_id
@@ -134,7 +144,7 @@ export function ReviewQueue() {
   }
 
   if (!activeProject || !domain || !projectId) {
-    return <div className="page"><EmptyState>No project selected.</EmptyState></div>
+    return <div className="page"><EmptyState>{t('reviewQueue.noProjectSelected')}</EmptyState></div>
   }
 
   const mechanismNames = (mechanismsData?.mechanisms ?? []).map((m) => m.name)
@@ -142,26 +152,26 @@ export function ReviewQueue() {
   return (
     <div className="page">
       <div>
-        <h1>Review queue</h1>
-        <p className="text-secondary">Confirm, reject, or correct what the detectors flagged — human review never changes the original detection, only adds a reviewed decision alongside it.</p>
+        <h1>{t('reviewQueue.title')}</h1>
+        <p className="text-secondary">{t('reviewQueue.subtitle')}</p>
       </div>
 
       <div className="card">
-        <div className="card-header"><h2>Filters</h2></div>
+        <div className="card-header"><h2>{t('reviewQueue.filters')}</h2></div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-            <span className="text-muted">Experiment</span>
-            <select className="filter-input" value={experimentId ?? ''} onChange={(e) => updateFilter('experiment_id', e.target.value)} aria-label="Filter by experiment">
-              <option value="">Any</option>
+            <span className="text-muted">{t('reviewQueue.experiment')}</span>
+            <select className="filter-input" value={experimentId ?? ''} onChange={(e) => updateFilter('experiment_id', e.target.value)} aria-label={t('reviewQueue.filterByExperiment')}>
+              <option value="">{t('reviewQueue.any')}</option>
               {(experimentsData?.experiments ?? []).map((e) => (
                 <option key={e.experiment_id} value={e.experiment_id}>{e.name}</option>
               ))}
             </select>
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-            <span className="text-muted">Mechanism</span>
-            <select className="filter-input" value={mechanism ?? ''} onChange={(e) => updateFilter('mechanism', e.target.value)} aria-label="Filter by mechanism">
-              <option value="">Any</option>
+            <span className="text-muted">{t('reviewQueue.mechanism')}</span>
+            <select className="filter-input" value={mechanism ?? ''} onChange={(e) => updateFilter('mechanism', e.target.value)} aria-label={t('reviewQueue.filterByMechanism')}>
+              <option value="">{t('reviewQueue.any')}</option>
               {mechanismNames.map((m) => (
                 <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>
               ))}
@@ -169,31 +179,31 @@ export function ReviewQueue() {
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
             <input type="checkbox" checked={!unreviewedOnly} onChange={(e) => updateFilter('show_all', e.target.checked ? '1' : '')} />
-            Show already-reviewed too
+            {t('reviewQueue.showAlreadyReviewed')}
           </label>
         </div>
       </div>
 
       <div className="card">
-        {isLoading && <LoadingState label="Loading review queue…" />}
+        {isLoading && <LoadingState label={t('reviewQueue.loadingQueue')} />}
         {error && <ErrorState error={error} />}
-        {data && data.items.length === 0 && <EmptyState>Nothing to review — no detected attributions match these filters.</EmptyState>}
+        {data && data.items.length === 0 && <EmptyState>{t('reviewQueue.nothingToReview')}</EmptyState>}
         {data && data.items.length > 0 && (
           <>
             <p className="text-secondary" style={{ marginBottom: 12, fontSize: 12.5 }}>
-              {data.total.toLocaleString('en-US')} item(s) · showing {offset + 1}-{Math.min(offset + PAGE_SIZE, data.total)}
+              {t('reviewQueue.itemsMatch', { total: data.total.toLocaleString('en-US'), from: offset + 1, to: Math.min(offset + PAGE_SIZE, data.total) })}
             </p>
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Session</th>
-                    <th>Version</th>
-                    <th>Mechanism</th>
-                    <th>Detector</th>
-                    <th>Confidence</th>
-                    <th>Evidence</th>
-                    <th>Decision</th>
+                    <th>{t('reviewQueue.session')}</th>
+                    <th>{t('reviewQueue.version')}</th>
+                    <th>{t('reviewQueue.mechanism')}</th>
+                    <th>{t('reviewQueue.detector')}</th>
+                    <th>{t('reviewQueue.confidence')}</th>
+                    <th>{t('reviewQueue.evidence')}</th>
+                    <th>{t('reviewQueue.decision')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -212,10 +222,10 @@ export function ReviewQueue() {
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
               <button type="button" className="btn btn-small" disabled={offset === 0} onClick={() => goToOffset(Math.max(0, offset - PAGE_SIZE))}>
-                ← Previous
+                {t('reviewQueue.previous')}
               </button>
               <button type="button" className="btn btn-small" disabled={offset + PAGE_SIZE >= data.total} onClick={() => goToOffset(offset + PAGE_SIZE)}>
-                Next →
+                {t('reviewQueue.next')}
               </button>
             </div>
           </>

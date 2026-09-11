@@ -602,6 +602,13 @@ export interface GenericFailureAttribution {
   review_status: 'unreviewed' | 'confirmed' | 'rejected'
   corrected_mechanism: string | null
   review_note: string | null
+  // Stage 19 task 8: version-level provenance for this one attribution.
+  detector_version: string
+  provider: string | null
+  model: string | null
+  prompt_version: string | null
+  reviewer: string | null
+  reviewed_at: string | null
 }
 
 export interface GenericSessionDetailResponse {
@@ -698,12 +705,87 @@ export interface GenericTrajectoryPatternItem {
   negative_outcome_rate_v2: number
 }
 
+// -- Stage 19: human-review-based attribution quality (distinct from the
+// offline classifier benchmark in ClassifierEvaluationResponse) --------
+
+export type SampleStatus = 'insufficient_review_data' | 'enough_data'
+
+export interface QualityCounts {
+  reviewed_count: number
+  confirmed_count: number
+  rejected_count: number
+  corrected_count: number
+  confirmation_rate: number | null
+  correction_rate: number | null
+  sample_status: SampleStatus
+}
+
+export interface MechanismQuality {
+  failure_mode: string
+  detector_source: string
+  counts: QualityCounts
+}
+
+export interface DetectorSourceQuality {
+  detector_source: string
+  counts: QualityCounts
+}
+
+export interface ConfidenceBucketQuality {
+  bucket_label: string
+  bucket_min: number
+  bucket_max: number
+  counts: QualityCounts
+}
+
+export interface VersionQualityBucket {
+  detector_version: string
+  provider: string | null
+  model: string | null
+  prompt_version: string | null
+  first_seen: string
+  last_seen: string
+  counts: QualityCounts
+}
+
+export interface ConfusionPair {
+  original_mechanism: string
+  corrected_mechanism: string
+  count: number
+}
+
+export interface DisagreementItem {
+  session_id: string
+  experiment_id: string
+  original_mechanism: string
+  corrected_mechanism: string | null
+  original_confidence: number | null
+  detector_source: string
+  detector_version: string
+  provider: string | null
+  model: string | null
+  prompt_version: string | null
+  reviewed_at: string
+}
+
+export interface HumanReviewQualityReport {
+  overall: QualityCounts
+  by_mechanism: MechanismQuality[]
+  by_detector_source: DetectorSourceQuality[]
+  by_confidence_bucket: ConfidenceBucketQuality[]
+  by_version: VersionQualityBucket[]
+  disagreement_items: DisagreementItem[]
+  confusion_pairs: ConfusionPair[]
+  min_reviews_threshold: number
+}
+
 export interface GenericAIQualitySummaryResponse {
   domain: string
   experiment_id: string
   failure_mechanism_prevalence: GenericFailureMechanismPrevalenceItem[]
   tool_use_quality: GenericToolUseQuality
   trajectory_patterns: GenericTrajectoryPatternItem[]
+  human_review_quality: HumanReviewQualityReport
 }
 
 // -- Stage 18 task 1: Alerts -------------------------------------------
@@ -748,6 +830,11 @@ export interface ReviewQueueItem {
   evidence_text: string | null
   reviewed: boolean
   high_impact: boolean
+  detector_version: string
+  provider: string | null
+  model: string | null
+  prompt_version: string | null
+  is_newest_version: boolean
 }
 
 export interface ReviewQueueResponse {

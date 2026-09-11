@@ -1,15 +1,16 @@
+import { useTranslation } from 'react-i18next'
 import type { Finding, GenericGuardrailCheck, MetricResult } from '../../api/types'
 import { ContributionChart, type ContributionRow } from '../common/ContributionChart'
 import { formatDelta, formatMetricValue, formatPercent, humanizeSegmentLabel } from '../../lib/format'
 import { isAndroidLatencySegment } from '../../lib/knownMechanisms'
 
 const CONTEXT_METRICS = [
-  { name: 'clarification_rate', label: 'Clarification behavior' },
-  { name: 'unnecessary_clarification_rate', label: 'Unnecessary clarification' },
-  { name: 'time_to_first_recommendation_ms', label: 'Latency to first recommendation' },
-  { name: 'tool_calls_per_session', label: 'Tool calls per session' },
-  { name: 'tool_error_rate', label: 'Tool error rate' },
-  { name: 'constraint_satisfaction_rate', label: 'Constraint quality' },
+  { name: 'clarification_rate', labelKey: 'mechanismPanel.contextClarificationBehavior' },
+  { name: 'unnecessary_clarification_rate', labelKey: 'mechanismPanel.contextUnnecessaryClarification' },
+  { name: 'time_to_first_recommendation_ms', labelKey: 'mechanismPanel.contextLatencyToFirstRecommendation' },
+  { name: 'tool_calls_per_session', labelKey: 'mechanismPanel.contextToolCallsPerSession' },
+  { name: 'tool_error_rate', labelKey: 'mechanismPanel.contextToolErrorRate' },
+  { name: 'constraint_satisfaction_rate', labelKey: 'mechanismPanel.contextConstraintQuality' },
 ]
 
 export function MechanismPanel({
@@ -19,6 +20,7 @@ export function MechanismPanel({
   metricsByName: Record<string, MetricResult>
   guardrails: GenericGuardrailCheck[]
 }) {
+  const { t } = useTranslation()
   const isLatency = isAndroidLatencySegment(finding)
   const fa = finding.failure_attribution
   const p95 = guardrails.find((g) => g.name === 'p95_latency')
@@ -32,8 +34,8 @@ export function MechanismPanel({
   return (
     <div className="card">
       <div className="card-header">
-        <h2>Mechanism: {humanizeSegmentLabel(finding.segment_label)}</h2>
-        <p>Associational evidence only — never a causal claim for post-treatment behavior.</p>
+        <h2>{t('mechanismPanel.mechanism', { segment: humanizeSegmentLabel(finding.segment_label) })}</h2>
+        <p>{t('mechanismPanel.associationalOnly')}</p>
       </div>
 
       {isLatency && (
@@ -41,49 +43,46 @@ export function MechanismPanel({
           className="card"
           style={{ background: 'var(--color-warning-weak)', borderColor: 'var(--color-warning)', marginBottom: 16, padding: '12px 14px' }}
         >
-          <strong style={{ fontSize: 12.5 }}>Non-conversational mechanism: elevated Android latency.</strong>
+          <strong style={{ fontSize: 12.5 }}>{t('mechanismPanel.nonConversationalTitle')}</strong>
           <p style={{ fontSize: 12.5, marginTop: 4 }}>
-            This segment's regression is associated with an Android-platform latency regression, not a conversational
-            failure mode. {p95 && (
-              <>The experiment-wide p95 latency guardrail is {p95.breached ? 'breached' : 'not breached'} (v1 {p95.v1_value.toFixed(0)}ms vs v2 {p95.v2_value.toFixed(0)}ms).</>
+            {t('mechanismPanel.nonConversationalBody')} {p95 && (
+              <>{t('mechanismPanel.guardrailStatus', { status: t(p95.breached ? 'mechanismPanel.breached' : 'mechanismPanel.notBreached'), v1: p95.v1_value.toFixed(0), v2: p95.v2_value.toFixed(0) })}</>
             )}{' '}
-            The classifier's dominant failure-mode label below (if any) is a secondary, incidental conversational-taxonomy
-            signal for this segment — it does not explain the regression. Open the affected sessions to see real per-session latency.
+            {t('mechanismPanel.nonConversationalFooter')}
           </p>
         </div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div>
-          <h3 style={{ marginBottom: 10 }}>Excess-abandonment attribution (segment-specific)</h3>
+          <h3 style={{ marginBottom: 10 }}>{t('mechanismPanel.excessAttribution')}</h3>
           {!fa.reportable && (
             <p className="text-muted" style={{ fontSize: 12 }}>
-              Total excess abandonment in this segment is too small to attribute a reliable per-mode share.
+              {t('mechanismPanel.tooSmallToAttribute')}
             </p>
           )}
           {fa.reportable && contributionRows.length > 0 && (
             <>
               <ContributionChart rows={contributionRows} />
               <p className="text-muted" style={{ fontSize: 11, marginTop: 10 }}>
-                Shares may exceed 100% or be negative (offsetting contributions) — not clamped or renormalized.
-                Abandonment: v1 {formatPercent(fa.abandonment_rate_v1)} → v2 {formatPercent(fa.abandonment_rate_v2)}.
+                {t('mechanismPanel.sharesNote', { v1: formatPercent(fa.abandonment_rate_v1), v2: formatPercent(fa.abandonment_rate_v2) })}
               </p>
             </>
           )}
         </div>
 
         <div>
-          <h3 style={{ marginBottom: 10 }}>Trajectory evidence (segment-specific)</h3>
+          <h3 style={{ marginBottom: 10 }}>{t('mechanismPanel.trajectoryEvidence')}</h3>
           {finding.trajectory_associations.length === 0 && (
-            <p className="text-muted" style={{ fontSize: 12 }}>No trajectory pattern reached the minimum session count in this segment.</p>
+            <p className="text-muted" style={{ fontSize: 12 }}>{t('mechanismPanel.noTrajectoryPattern')}</p>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {finding.trajectory_associations.map((t) => (
-              <div key={t.pattern} style={{ fontSize: 12 }}>
-                <span className="mono">{t.pattern}</span>
+            {finding.trajectory_associations.map((traj) => (
+              <div key={traj.pattern} style={{ fontSize: 12 }}>
+                <span className="mono">{traj.pattern}</span>
                 <div className="text-secondary">
-                  n={t.n_sessions} · outcome rate {formatPercent(t.pattern_outcome_rate)} vs baseline {formatPercent(t.baseline_outcome_rate)}{' '}
-                  {t.bh_significant ? <span className="chip chip-accent" style={{ marginLeft: 4 }}>co-occurs with outcome (BH-significant)</span> : <span className="text-muted">(not significant after correction)</span>}
+                  {t('mechanismPanel.trajectoryStats', { n: traj.n_sessions, rate: formatPercent(traj.pattern_outcome_rate), baseline: formatPercent(traj.baseline_outcome_rate) })}{' '}
+                  {traj.bh_significant ? <span className="chip chip-accent" style={{ marginLeft: 4 }}>{t('mechanismPanel.bhSignificant')}</span> : <span className="text-muted">{t('mechanismPanel.notSignificantAfterCorrection')}</span>}
                 </div>
               </div>
             ))}
@@ -92,17 +91,17 @@ export function MechanismPanel({
       </div>
 
       <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
-        <h3 style={{ marginBottom: 4 }}>Experiment-wide mechanism context</h3>
+        <h3 style={{ marginBottom: 4 }}>{t('mechanismPanel.experimentWideContext')}</h3>
         <p className="text-muted" style={{ fontSize: 11, marginBottom: 10 }}>
-          Not segment-specific — shown for context on the kind of behavior associated with v2 overall.
+          {t('mechanismPanel.experimentWideContextSub')}
         </p>
         <div className="grid-3">
-          {CONTEXT_METRICS.map(({ name, label }) => {
+          {CONTEXT_METRICS.map(({ name, labelKey }) => {
             const m = metricsByName[name]
             if (!m) return null
             return (
               <div key={name} style={{ fontSize: 12 }}>
-                <div className="text-muted" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
+                <div className="text-muted" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{t(labelKey)}</div>
                 <div>
                   {formatMetricValue(name, m.cluster_mean_v1)} → {formatMetricValue(name, m.cluster_mean_v2)}{' '}
                   <span className="text-secondary">({formatDelta(name, m.cluster_mean_v1, m.cluster_mean_v2)})</span>

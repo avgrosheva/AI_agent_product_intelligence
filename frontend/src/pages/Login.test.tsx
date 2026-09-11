@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Login } from './Login'
 import { AuthProvider } from '../state/AuthContext'
+import { LanguageProvider } from '../state/LanguageContext'
+import { ThemeProvider } from '../state/ThemeContext'
 import { clearToken } from '../api/client'
 
 vi.mock('../api/client', async () => {
@@ -17,11 +19,15 @@ describe('Login', () => {
     vi.mocked(apiPost).mockResolvedValueOnce({ access_token: 'fresh-token', token_type: 'bearer' })
 
     render(
-      <MemoryRouter initialEntries={['/login']}>
-        <AuthProvider>
-          <Login />
-        </AuthProvider>
-      </MemoryRouter>,
+      <ThemeProvider>
+        <LanguageProvider>
+          <MemoryRouter initialEntries={['/login']}>
+            <AuthProvider>
+              <Login />
+            </AuthProvider>
+          </MemoryRouter>
+        </LanguageProvider>
+      </ThemeProvider>,
     )
 
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'demo@example.com' } })
@@ -37,11 +43,15 @@ describe('Login', () => {
     vi.mocked(apiPost).mockRejectedValueOnce(new ApiError(401, 'invalid email or password'))
 
     render(
-      <MemoryRouter initialEntries={['/login']}>
-        <AuthProvider>
-          <Login />
-        </AuthProvider>
-      </MemoryRouter>,
+      <ThemeProvider>
+        <LanguageProvider>
+          <MemoryRouter initialEntries={['/login']}>
+            <AuthProvider>
+              <Login />
+            </AuthProvider>
+          </MemoryRouter>
+        </LanguageProvider>
+      </ThemeProvider>,
     )
 
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'demo@example.com' } })

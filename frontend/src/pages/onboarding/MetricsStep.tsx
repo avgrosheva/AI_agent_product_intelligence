@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AvailableMetric, MetricConfigEntry, ProjectConfig, ProjectConfigPatch } from '../../api/types'
 import { humanizeMetricName } from '../../lib/format'
 import { formatValidationErrors } from './validationError'
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export function MetricsStep({ config, onSave, saving }: Props) {
+  const { t } = useTranslation()
   const [primaryMetric, setPrimaryMetric] = useState(config.primary_metric ?? '')
   const [primaryError, setPrimaryError] = useState<string[] | null>(null)
 
@@ -97,31 +99,31 @@ export function MetricsStep({ config, onSave, saving }: Props) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div className="card">
         <div className="card-header">
-          <h2>Primary metric</h2>
-          <p>The one metric release decisions are judged on. Must be one of this project's inferential metrics.</p>
+          <h2>{t('onboarding.metrics.primaryMetricTitle')}</h2>
+          <p>{t('onboarding.metrics.primaryMetricSubtitle')}</p>
         </div>
         <form onSubmit={handleSavePrimary} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <label className="field" style={{ flex: 1 }}>
-            <span>Primary metric</span>
+            <span>{t('onboarding.metrics.primaryMetricLabel')}</span>
             <select value={primaryMetric} onChange={(e) => setPrimaryMetric(e.target.value)}>
-              <option value="">-- none selected --</option>
+              <option value="">{t('onboarding.metrics.noneSelected')}</option>
               {inferentialMetrics.map((m) => (
                 <option key={m.name} value={m.name}>{m.label || humanizeMetricName(m.name)} ({m.name})</option>
               ))}
             </select>
           </label>
-          <button type="submit" className="btn btn-primary" disabled={saving}>Save</button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>{t('common.save')}</button>
         </form>
         {primaryError && <div className="chip chip-negative" style={{ marginTop: 10 }}>{primaryError.join('; ')}</div>}
       </div>
 
       <div className="card">
         <div className="card-header">
-          <h2>Metrics</h2>
+          <h2>{t('onboarding.metrics.title')}</h2>
           <p>
             {config.metrics === null
-              ? "Using this domain's default metrics."
-              : 'This project has a customized metric list.'}
+              ? t('onboarding.metrics.usingDefaults')
+              : t('onboarding.metrics.customized')}
           </p>
         </div>
 
@@ -129,12 +131,12 @@ export function MetricsStep({ config, onSave, saving }: Props) {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Label</th>
-                <th>Type</th>
-                <th>Direction</th>
-                <th>Value column</th>
-                <th>Inferential</th>
+                <th>{t('onboarding.metrics.colName')}</th>
+                <th>{t('onboarding.metrics.colLabel')}</th>
+                <th>{t('onboarding.metrics.colType')}</th>
+                <th>{t('onboarding.metrics.colDirection')}</th>
+                <th>{t('onboarding.metrics.colValueColumn')}</th>
+                <th>{t('onboarding.metrics.colInferential')}</th>
               </tr>
             </thead>
             <tbody>
@@ -145,7 +147,7 @@ export function MetricsStep({ config, onSave, saving }: Props) {
                   <td>{m.metric_type}</td>
                   <td>{m.direction}</td>
                   <td className="mono">{m.value_column ?? '—'}</td>
-                  <td>{m.is_inferential ? 'Yes' : 'No'}</td>
+                  <td>{m.is_inferential ? t('common.yes') : t('common.no')}</td>
                 </tr>
               ))}
             </tbody>
@@ -154,10 +156,10 @@ export function MetricsStep({ config, onSave, saving }: Props) {
 
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
           {!showAddForm && (
-            <button type="button" className="btn btn-small" onClick={() => setShowAddForm(true)}>+ Add a custom metric</button>
+            <button type="button" className="btn btn-small" onClick={() => setShowAddForm(true)}>{t('onboarding.metrics.addCustom')}</button>
           )}
           {config.metrics !== null && (
-            <button type="button" className="btn btn-small" onClick={handleResetToDefaults} disabled={saving}>Reset to domain defaults</button>
+            <button type="button" className="btn btn-small" onClick={handleResetToDefaults} disabled={saving}>{t('onboarding.metrics.resetToDefaults')}</button>
           )}
         </div>
 
@@ -165,25 +167,25 @@ export function MetricsStep({ config, onSave, saving }: Props) {
           <form onSubmit={handleAddMetric} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14, borderTop: '1px solid var(--color-border)', paddingTop: 14 }}>
             <div className="grid-2">
               <label className="field">
-                <span>Metric name (unique)</span>
+                <span>{t('onboarding.metrics.metricNameUnique')}</span>
                 <input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
               </label>
               <label className="field">
-                <span>Display label</span>
-                <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={name || 'e.g. Resolution rate'} />
+                <span>{t('onboarding.metrics.displayLabel')}</span>
+                <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={name || t('onboarding.metrics.displayLabelPlaceholder')} />
               </label>
               <label className="field">
-                <span>Value column (in your ingested data)</span>
-                <input value={valueColumn} onChange={(e) => setValueColumn(e.target.value)} placeholder="e.g. resolved" />
+                <span>{t('onboarding.metrics.valueColumnInput')}</span>
+                <input value={valueColumn} onChange={(e) => setValueColumn(e.target.value)} placeholder={t('onboarding.metrics.valueColumnPlaceholder')} />
               </label>
               <label className="field">
-                <span>Type</span>
+                <span>{t('onboarding.metrics.colType')}</span>
                 <select value={metricType} onChange={(e) => setMetricType(e.target.value)}>
-                  {METRIC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  {METRIC_TYPES.map((mt) => <option key={mt} value={mt}>{mt}</option>)}
                 </select>
               </label>
               <label className="field">
-                <span>Direction</span>
+                <span>{t('onboarding.metrics.colDirection')}</span>
                 <select value={direction} onChange={(e) => setDirection(e.target.value)}>
                   {DIRECTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
@@ -192,32 +194,32 @@ export function MetricsStep({ config, onSave, saving }: Props) {
             <div style={{ display: 'flex', gap: 16 }}>
               <label className="checkbox-field">
                 <input type="checkbox" checked={isInferential} onChange={(e) => setIsInferential(e.target.checked)} />
-                Usable as primary metric (inferential)
+                {t('onboarding.metrics.usableAsPrimary')}
               </label>
               <label className="checkbox-field">
                 <input type="checkbox" checked={isDescriptive} onChange={(e) => setIsDescriptive(e.target.checked)} />
-                Show in metric tables (descriptive)
+                {t('onboarding.metrics.showInTables')}
               </label>
             </div>
 
             <details>
-              <summary style={{ cursor: 'pointer', fontSize: 12.5, color: 'var(--color-text-secondary)' }}>Eligibility (optional, advanced)</summary>
+              <summary style={{ cursor: 'pointer', fontSize: 12.5, color: 'var(--color-text-secondary)' }}>{t('onboarding.metrics.eligibilityOptional')}</summary>
               <div className="grid-3" style={{ marginTop: 10 }}>
                 <label className="field">
-                  <span>Rule</span>
+                  <span>{t('onboarding.metrics.rule')}</span>
                   <select value={eligibilityKind} onChange={(e) => setEligibilityKind(e.target.value)}>
-                    {ELIGIBILITY_KINDS.map((k) => <option key={k} value={k}>{k === 'none' ? 'None -- include all sessions' : k}</option>)}
+                    {ELIGIBILITY_KINDS.map((k) => <option key={k} value={k}>{k === 'none' ? t('onboarding.metrics.noneIncludeAll') : k}</option>)}
                   </select>
                 </label>
                 {eligibilityKind !== 'none' && (
                   <label className="field">
-                    <span>Column</span>
+                    <span>{t('onboarding.metrics.column')}</span>
                     <input value={eligibilityColumn} onChange={(e) => setEligibilityColumn(e.target.value)} />
                   </label>
                 )}
                 {(eligibilityKind === 'equals' || eligibilityKind === 'gte') && (
                   <label className="field">
-                    <span>Value</span>
+                    <span>{t('onboarding.metrics.value')}</span>
                     <input value={eligibilityValue} onChange={(e) => setEligibilityValue(e.target.value)} />
                   </label>
                 )}
@@ -225,8 +227,8 @@ export function MetricsStep({ config, onSave, saving }: Props) {
             </details>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Add metric'}</button>
-              <button type="button" className="btn" onClick={() => setShowAddForm(false)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? t('common.saving') : t('onboarding.metrics.addMetric')}</button>
+              <button type="button" className="btn" onClick={() => setShowAddForm(false)}>{t('common.cancel')}</button>
             </div>
           </form>
         )}

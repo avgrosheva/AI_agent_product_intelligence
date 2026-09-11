@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { MetricResult } from '../../api/types'
 import { formatDelta, formatMetricValue, formatPValue, humanizeMetricName } from '../../lib/format'
 import { deltaDirection } from '../../lib/metricPolarity'
@@ -17,6 +18,7 @@ const DIRECTION_CLASS: Record<'good' | 'bad' | 'neutral', string> = {
  * Stage 6 SS4B ("a reviewer should understand the result without reading
  * p-values everywhere"). */
 export function MetricComparisonRow({ metric, showName = true }: { metric: MetricResult; showName?: boolean }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const v1 = metric.cluster_mean_v1 ?? metric.session_value_v1
   const v2 = metric.cluster_mean_v2 ?? metric.session_value_v2
@@ -34,15 +36,15 @@ export function MetricComparisonRow({ metric, showName = true }: { metric: Metri
         )}
         <div style={{ display: 'flex', gap: 20, flex: 1, minWidth: 220 }}>
           <div>
-            <div className="text-muted" style={{ fontSize: 11 }}>v1</div>
+            <div className="text-muted" style={{ fontSize: 11 }}>{t('common.v1')}</div>
             <div className="mono" style={{ fontSize: 13.5 }}>{formatMetricValue(metric.metric_name, v1)}</div>
           </div>
           <div>
-            <div className="text-muted" style={{ fontSize: 11 }}>v2</div>
+            <div className="text-muted" style={{ fontSize: 11 }}>{t('common.v2')}</div>
             <div className="mono" style={{ fontSize: 13.5 }}>{formatMetricValue(metric.metric_name, v2)}</div>
           </div>
           <div>
-            <div className="text-muted" style={{ fontSize: 11 }}>delta</div>
+            <div className="text-muted" style={{ fontSize: 11 }}>{t('common.delta')}</div>
             <span className={`chip ${DIRECTION_CLASS[direction]}`}>{formatDelta(metric.metric_name, v1, v2)}</span>
           </div>
         </div>
@@ -54,26 +56,22 @@ export function MetricComparisonRow({ metric, showName = true }: { metric: Metri
             onClick={() => setExpanded((e) => !e)}
             aria-expanded={expanded}
           >
-            {expanded ? 'Hide detail' : 'Detail'}
+            {expanded ? t('common.hideDetail') : t('common.detail')}
           </button>
         )}
       </div>
       {expanded && hasDetail && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12 }} className="text-secondary">
-            {metric.test_name && <span>test: {metric.test_name}</span>}
+            {metric.test_name && <span>{t('metricRow.test', { name: metric.test_name })}</span>}
             {metric.p_value !== null && <span>p = {formatPValue(metric.p_value)}</span>}
             {metric.effect_size_name && metric.effect_size_value !== null && (
               <span>{metric.effect_size_name} = {metric.effect_size_value.toFixed(3)}</span>
             )}
-            <span>n1={metric.n_users_v1.toLocaleString('en-US')} users, n2={metric.n_users_v2.toLocaleString('en-US')} users</span>
+            <span>{t('metricRow.usersCount', { n1: metric.n_users_v1.toLocaleString('en-US'), n2: metric.n_users_v2.toLocaleString('en-US') })}</span>
           </div>
           {metric.ci_low !== null && metric.ci_high !== null && (
-            <CIRange
-              low={metric.ci_low}
-              high={metric.ci_high}
-              formatValue={(v) => formatDelta(metric.metric_name, 0, v)}
-            />
+            <CIRange low={metric.ci_low} high={metric.ci_high} formatValue={(v) => formatDelta(metric.metric_name, 0, v)} />
           )}
           {metric.notes.length > 0 && (
             <div className="text-muted" style={{ fontSize: 11.5 }}>{metric.notes.join(' · ')}</div>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useDomainInvestigation, useDomainMetrics, useProjectConfig } from '../api/hooks'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
 import { RecommendationPanel } from '../components/common/RecommendationPanel'
@@ -19,6 +20,7 @@ import { useActiveProject } from '../state/ActiveProjectContext'
  * and release evaluations use), with a dropdown over the domain's other
  * implemented, inferential metrics for exploring a different one. */
 export function Investigation() {
+  const { t } = useTranslation()
   const { experimentId } = useParams<{ experimentId: string }>()
   const { activeProject } = useActiveProject()
   const domain = activeProject?.domain
@@ -77,12 +79,12 @@ export function Investigation() {
     setSearchParams({ metric: next })
   }
 
-  if (!experimentId) return <div className="page"><EmptyState>No active experiment selected.</EmptyState></div>
+  if (!experimentId) return <div className="page"><EmptyState>{t('investigation.noActiveExperiment')}</EmptyState></div>
   if (!metric) {
     return (
       <div className="page">
         <EmptyState>
-          This project has no primary metric configured yet, and none was requested — configure one in Project Setup to run an investigation.
+          {t('investigation.noPrimaryMetricConfigured')}
         </EmptyState>
       </div>
     )
@@ -90,13 +92,16 @@ export function Investigation() {
 
   return (
     <div className="page">
-      <div>
-        <h1>Investigation</h1>
-        <p className="text-secondary">Where is the regression concentrated, and what behavior is associated with it?</p>
+      <div className="page-hero">
+        <div className="deco deco-blob" aria-hidden="true" style={{ width: 130, height: 130, top: -50, right: 40, background: 'var(--color-accent)', opacity: 0.35 }} />
+        <div className="page-hero-content">
+          <h1>{t('investigation.title')}</h1>
+          <p className="text-secondary">{t('investigation.subtitle')}</p>
+        </div>
       </div>
 
       {visibleMetrics.length > 1 && (
-        <div className="tabs" style={{ alignItems: 'center' }}>
+        <div className="tabs" style={{ alignItems: 'center', overflowX: 'auto', flexWrap: 'nowrap' }}>
           {visibleMetrics.map((m) => (
             <button key={m.name} type="button" className={`tab${metric === m.name ? ' active' : ''}`} onClick={() => setMetric(m.name)}>
               {m.label || humanizeMetricName(m.name)}
@@ -106,31 +111,31 @@ export function Investigation() {
             <button
               type="button"
               className="btn btn-small"
-              style={{ marginLeft: 8 }}
+              style={{ marginLeft: 8, flexShrink: 0 }}
               onClick={() => setShowAllMetrics((v) => !v)}
             >
-              {showAllMetrics ? 'Show fewer' : `Show all ${allInferentialMetrics.length} metrics`}
+              {showAllMetrics ? t('investigation.showFewer') : t('investigation.showAllMetrics', { count: allInferentialMetrics.length })}
             </button>
           )}
         </div>
       )}
 
-      {isLoading && <LoadingState label={`Running investigation on ${metric}…`} />}
+      {isLoading && <LoadingState label={t('investigation.runningInvestigation', { metric })} />}
       {error && <ErrorState error={error} />}
 
       {inv && (
         <>
           <div className="card">
             <div className="text-muted" style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-              Primary regression signal
+              {t('investigation.primaryRegressionSignal')}
             </div>
             <h2 style={{ marginBottom: 8 }}>{findingHeadline(metric, inv.findings[0])}</h2>
             {inv.findings[0] && (
               <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 13 }}>
                 <span>v1 {formatMetricValue(inv.primary_metric, inv.findings[0].cluster_mean_v1)} → v2 {formatMetricValue(inv.primary_metric, inv.findings[0].cluster_mean_v2)}</span>
-                <span>delta {formatDelta(inv.primary_metric, inv.findings[0].cluster_mean_v1, inv.findings[0].cluster_mean_v2)}</span>
+                <span>{t('investigation.deltaLabel', { value: formatDelta(inv.primary_metric, inv.findings[0].cluster_mean_v1, inv.findings[0].cluster_mean_v2) })}</span>
                 <span>p = {formatPValue(inv.findings[0].p_value)}</span>
-                <span>excess contribution {(inv.findings[0].excess_contribution * 100).toFixed(1)}%</span>
+                <span>{t('investigation.excessContribution', { value: (inv.findings[0].excess_contribution * 100).toFixed(1) })}</span>
               </div>
             )}
           </div>
@@ -138,8 +143,8 @@ export function Investigation() {
           {inv.findings.length > 1 && (
             <div className="card">
               <div className="card-header">
-                <h2>Excess contribution by segment</h2>
-                <p>Which segment(s) actually drive the regression — magnitude and direction, most-significant first.</p>
+                <h2>{t('investigation.excessContributionBySegment')}</h2>
+                <p>{t('investigation.excessContributionSub')}</p>
               </div>
               <SegmentEffectChart rows={inv.findings.map((f) => ({ segment_label: f.segment_label, excess_contribution: f.excess_contribution }))} />
             </div>
@@ -147,8 +152,8 @@ export function Investigation() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 20, alignItems: 'start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <h3>Ranked findings ({inv.findings.length})</h3>
-              {inv.findings.length === 0 && <EmptyState>No segment passed correction and minimum-effect-size filtering for this metric.</EmptyState>}
+              <h3>{t('investigation.rankedFindings', { count: inv.findings.length })}</h3>
+              {inv.findings.length === 0 && <EmptyState>{t('investigation.noSegmentPassed')}</EmptyState>}
               {inv.findings.map((f, i) => (
                 <FindingCard
                   key={f.segment_label}

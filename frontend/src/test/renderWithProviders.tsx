@@ -6,6 +6,8 @@ import { setToken } from '../api/client'
 import { ActiveExperimentProvider } from '../state/ActiveExperimentContext'
 import { ActiveProjectProvider } from '../state/ActiveProjectContext'
 import { AuthProvider } from '../state/AuthContext'
+import { LanguageProvider } from '../state/LanguageContext'
+import { ThemeProvider } from '../state/ThemeContext'
 
 /** `path` is the route *pattern* (e.g. "/experiments/:experimentId") so
  * components using useParams() resolve correctly; `route` is the actual
@@ -34,17 +36,21 @@ export function renderWithProviders(ui: ReactElement, { route = '/', path }: { r
   const routePattern = path ?? route.split('?')[0]
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[route]}>
-        <AuthProvider>
-          <ActiveProjectProvider>
-            <ActiveExperimentProvider>
-              <Routes>
-                <Route path={routePattern} element={ui} />
-              </Routes>
-            </ActiveExperimentProvider>
-          </ActiveProjectProvider>
-        </AuthProvider>
-      </MemoryRouter>
+      <ThemeProvider>
+        <LanguageProvider>
+          <MemoryRouter initialEntries={[route]}>
+            <AuthProvider>
+              <ActiveProjectProvider>
+                <ActiveExperimentProvider>
+                  <Routes>
+                    <Route path={routePattern} element={ui} />
+                  </Routes>
+                </ActiveExperimentProvider>
+              </ActiveProjectProvider>
+            </AuthProvider>
+          </MemoryRouter>
+        </LanguageProvider>
+      </ThemeProvider>
     </QueryClientProvider>,
   )
 }
