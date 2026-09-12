@@ -1,5 +1,7 @@
 # AI Agent Product Intelligence
 
+*[Читать на русском](README.ru.md)*
+
 **Release intelligence for AI agents.** Connect agent behavior, release experiments, business outcomes, economics, and human feedback into one place, so an AI product team can answer — with evidence, not a hunch — *did the new version actually improve the product, and should we ship it?*
 
 **Built for:** AI product managers, ML/product analysts, and AI platform teams who ship new agent or model versions regularly and need a repeatable, defensible way to decide **SHIP / HOLD / ROLLBACK** — not just a dashboard of traces and token counts.
