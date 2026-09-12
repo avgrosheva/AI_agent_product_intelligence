@@ -113,7 +113,7 @@ def test_original_attribution_is_never_modified_by_a_review(api_client, db_engin
 
 def test_session_detail_surfaces_review_status_without_touching_original_fields(api_client, db_engine):
     session_id, failure_mode = _one_detected_commerce_attribution(db_engine, index=4)
-    detail_before = api_client.get(f"/sessions/{session_id}").json()
+    detail_before = api_client.get(f"/api/v1/domains/commerce/sessions/{session_id}").json()
     original = next(f for f in detail_before["failure_attributions"] if f["failure_mode"] == failure_mode)
     assert original["review_status"] == "unreviewed"
     original_confidence = original["confidence"]
@@ -124,7 +124,7 @@ def test_session_detail_surfaces_review_status_without_touching_original_fields(
         json={"decision": "confirmed", "note": "yep"},
     )
 
-    detail_after = api_client.get(f"/sessions/{session_id}").json()
+    detail_after = api_client.get(f"/api/v1/domains/commerce/sessions/{session_id}").json()
     reviewed = next(f for f in detail_after["failure_attributions"] if f["failure_mode"] == failure_mode)
     assert reviewed["review_status"] == "confirmed"
     assert reviewed["review_note"] == "yep"

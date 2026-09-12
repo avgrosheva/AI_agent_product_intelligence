@@ -1,6 +1,19 @@
-"""AI Quality screen: failure-mode distribution, tool-use quality,
-trajectory pattern frequency (descriptive only — not an Investigation
-finding), and the mandatory classifier evaluation report with provenance.
+"""AI Quality screen: the mandatory classifier evaluation report with
+provenance.
+
+Security fix: this router used to also serve GET
+/experiments/{experiment_id}/ai-quality (failure-mode prevalence,
+tool-use quality, trajectory patterns for one experiment), gated by
+nothing more than get_current_user -- any authenticated user of any org
+could read another org's AI-quality data by guessing/obtaining an
+experiment id. That route is removed; the same data is now only
+reachable through the project-scoped GET
+/api/v1/domains/{domain}/experiments/{experiment_id}/ai-quality
+(backend.app.routers.domains.get_domain_ai_quality), which verifies
+project/org ownership via get_project_context. The route below,
+classifier-evaluation, was never part of that bug: it reads only a
+global, non-tenant classifier benchmark artifact, never a customer's
+data, so it stays exactly as it was.
 """
 
 from __future__ import annotations
@@ -8,25 +21,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import text
 
 from backend.app.auth_deps import CurrentUser, get_current_user
-from backend.app.dependencies import get_agent_actions_df, get_base_df, get_engine, get_experiment_or_404
 from backend.app.schemas.ai_quality import (
-    AIQualitySummaryResponse,
     ClassifierAcceptanceBar,
     ClassifierEvaluationResponse,
     ClassifierPerClassMetric,
     DeterministicDetectorMetric,
-    FailureMechanismPrevalenceItem,
     HybridEvaluationSummary,
     SemanticMechanismMetric,
-    ToolUseQualitySchema,
-    TrajectoryPatternFrequencyItem,
 )
 from backend.app.schemas.common import ClassifierProvenance
-from backend.investigation.trajectory_attribution import canonicalize_patterns, reconstruct_trajectories
-from backend.llm.client import DETERMINISTIC_MECHANISMS, FAILURE_MECHANISMS
 from backend.llm.provenance import (
     CURRENT_HYBRID_EVALUATION_SUMMARY_PATH,
     DETERMINISTIC_DETECTORS_PERFECT_SCORE_NOTE,
@@ -35,7 +40,6 @@ from backend.llm.provenance import (
     read_current_hybrid_evaluation_summary,
     read_evaluation_summary,
 )
-from backend.review.service import count_reviews_by_mechanism
 
 router = APIRouter(tags=["ai-quality"])
 
@@ -84,88 +88,6 @@ def _hybrid_evaluation() -> HybridEvaluationSummary | None:
         semantic_hamming_loss=raw["semantic_metrics"]["hamming_loss"],
         semantic_coverage=raw["semantic_coverage"]["coverage"],
         evaluated_at=evaluated_at,
-    )
-
-
-@router.get("/experiments/{experiment_id}/ai-quality", response_model=AIQualitySummaryResponse)
-def get_ai_quality_summary(experiment_id: str, user: CurrentUser = Depends(get_current_user)) -> AIQualitySummaryResponse:
-    get_experiment_or_404(experiment_id)
-    base_df = get_base_df(experiment_id=experiment_id)
-
-    with get_engine().connect() as conn:
-        rows = conn.execute(
-            text(
-                """
-                SELECT s.agent_version::text AS agent_version, sfa.failure_mode::text AS failure_mode, count(*) AS n
-                FROM session_failure_attributions sfa JOIN sessions s ON s.session_id = sfa.session_id
-                WHERE s.experiment_id = :eid AND sfa.detected = true
-                GROUP BY 1, 2
-                """
-            ),
-            {"eid": experiment_id},
-        ).mappings().all()
-        source_rows = conn.execute(
-            text("SELECT DISTINCT failure_mode::text AS failure_mode, detector_source::text AS detector_source FROM session_failure_attributions")
-        ).mappings().all()
-    counts: dict[str, dict[str, int]] = {}
-    n_v1 = int((base_df.agent_version == "v1").sum())
-    n_v2 = int((base_df.agent_version == "v2").sum())
-    for r in rows:
-        counts.setdefault(r["failure_mode"], {})[r["agent_version"]] = r["n"]
-    sources = {r["failure_mode"]: r["detector_source"] for r in source_rows}
-    review_counts = count_reviews_by_mechanism(get_engine(), "commerce", set(base_df["session_id"].astype(str)))
-
-    # Prevalence, not an exclusive distribution: mechanisms can co-occur,
-    # so rate_v1/rate_v2 summed across items do not sum to 1.0.
-    prevalence = [
-        FailureMechanismPrevalenceItem(
-            failure_mode=mode,
-            detector_source=sources.get(mode, "deterministic" if mode in DETERMINISTIC_MECHANISMS else "unknown"),
-            count_v1=counts.get(mode, {}).get("v1", 0),
-            count_v2=counts.get(mode, {}).get("v2", 0),
-            rate_v1=(counts.get(mode, {}).get("v1", 0) / n_v1) if n_v1 else 0.0,
-            rate_v2=(counts.get(mode, {}).get("v2", 0) / n_v2) if n_v2 else 0.0,
-            reviewed_count=review_counts.get(mode, {}).get("reviewed", 0),
-            confirmed_count=review_counts.get(mode, {}).get("confirmed", 0),
-            rejected_count=review_counts.get(mode, {}).get("rejected", 0),
-        )
-        for mode in FAILURE_MECHANISMS
-    ]
-
-    tool_use = ToolUseQualitySchema(
-        tool_calls_per_session_v1=float(base_df.loc[base_df.agent_version == "v1", "n_tool_calls"].mean()),
-        tool_calls_per_session_v2=float(base_df.loc[base_df.agent_version == "v2", "n_tool_calls"].mean()),
-        tool_success_rate_v1=float(base_df.loc[base_df.agent_version == "v1", "tool_success_rate_session"].mean()),
-        tool_success_rate_v2=float(base_df.loc[base_df.agent_version == "v2", "tool_success_rate_session"].mean()),
-        tool_error_rate_v1=float(base_df.loc[base_df.agent_version == "v1", "tool_error_rate_session"].mean()),
-        tool_error_rate_v2=float(base_df.loc[base_df.agent_version == "v2", "tool_error_rate_session"].mean()),
-    )
-
-    actions_df = get_agent_actions_df()
-    trajectories = reconstruct_trajectories(actions_df)
-    merged = base_df.merge(trajectories, on="session_id", how="left")
-    canon = canonicalize_patterns(merged.dropna(subset=["action_sequence"]))
-    traj_items = []
-    for pattern, group in canon.groupby("pattern"):
-        v1 = group[group.agent_version == "v1"]
-        v2 = group[group.agent_version == "v2"]
-        if len(v1) + len(v2) < 5:
-            continue
-        traj_items.append(
-            TrajectoryPatternFrequencyItem(
-                pattern=pattern, n_sessions_v1=len(v1), n_sessions_v2=len(v2),
-                abandonment_rate_v1=float(v1["abandoned"].mean()) if len(v1) else 0.0,
-                abandonment_rate_v2=float(v2["abandoned"].mean()) if len(v2) else 0.0,
-            )
-        )
-    traj_items.sort(key=lambda t: t.n_sessions_v1 + t.n_sessions_v2, reverse=True)
-
-    return AIQualitySummaryResponse(
-        experiment_id=experiment_id,
-        failure_mechanism_prevalence=prevalence,
-        tool_use_quality=tool_use,
-        trajectory_patterns=traj_items,
-        classifier_provenance=_classifier_provenance(),
     )
 
 

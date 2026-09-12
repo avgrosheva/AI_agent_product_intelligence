@@ -42,34 +42,36 @@ def _source_without_docstrings(module) -> str:
 
 
 def test_experiments_list_is_clean(api_client):
-    resp = api_client.get("/experiments")
+    resp = api_client.get("/api/v1/domains/commerce/experiments")
     _assert_response_is_clean(resp.json())
 
 
 def test_experiment_metrics_is_clean(api_client, experiment_id):
-    resp = api_client.get(f"/experiments/{experiment_id}/metrics")
+    resp = api_client.get(f"/api/v1/domains/commerce/experiments/{experiment_id}/metrics")
     _assert_response_is_clean(resp.json())
 
 
-def test_investigation_response_is_clean_for_every_lens(api_client, experiment_id):
-    for lens in ("abandonment", "conversion", "constraint_satisfaction"):
-        resp = api_client.get(f"/experiments/{experiment_id}/investigation", params={"lens": lens})
+def test_investigation_response_is_clean_for_every_metric(api_client, experiment_id):
+    for metric in ("abandonment_rate", "conversion_rate", "constraint_satisfaction_rate"):
+        resp = api_client.get(f"/api/v1/domains/commerce/experiments/{experiment_id}/investigation", params={"primary_metric": metric})
         _assert_response_is_clean(resp.json())
 
 
-def test_session_list_is_clean(api_client):
-    resp = api_client.get("/sessions", params={"limit": 100})
+def test_session_list_is_clean(api_client, experiment_id):
+    resp = api_client.get("/api/v1/domains/commerce/sessions", params={"experiment_id": experiment_id, "limit": 100})
     _assert_response_is_clean(resp.json())
 
 
-def test_session_detail_is_clean(api_client):
-    session_id = api_client.get("/sessions", params={"limit": 1}).json()["items"][0]["session_id"]
-    resp = api_client.get(f"/sessions/{session_id}")
+def test_session_detail_is_clean(api_client, experiment_id):
+    session_id = api_client.get(
+        "/api/v1/domains/commerce/sessions", params={"experiment_id": experiment_id, "limit": 1}
+    ).json()["items"][0]["session_id"]
+    resp = api_client.get(f"/api/v1/domains/commerce/sessions/{session_id}")
     _assert_response_is_clean(resp.json())
 
 
 def test_ai_quality_is_clean(api_client, experiment_id):
-    resp = api_client.get(f"/experiments/{experiment_id}/ai-quality")
+    resp = api_client.get(f"/api/v1/domains/commerce/experiments/{experiment_id}/ai-quality")
     _assert_response_is_clean(resp.json())
     resp2 = api_client.get("/ai-quality/classifier-evaluation")
     _assert_response_is_clean(resp2.json())

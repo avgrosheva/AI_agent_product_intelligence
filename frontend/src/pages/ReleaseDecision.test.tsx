@@ -3,7 +3,7 @@ import { screen, waitFor } from '@testing-library/react'
 import { ApiError, apiGet, apiPost } from '../api/client'
 import { ReleaseDecision } from './ReleaseDecision'
 import { renderWithProviders } from '../test/renderWithProviders'
-import { apiGetMockImpl, DOMAIN, EXPERIMENT_ID } from '../test/fixtures'
+import { apiGetMockImpl, DOMAIN, EXPERIMENT_ID, RELEASE_SUMMARY_FIXTURE } from '../test/fixtures'
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -88,5 +88,38 @@ describe('ReleaseDecision', () => {
 
     await waitFor(() => expect(screen.getByText(/can take up to a minute/i)).toBeInTheDocument())
     resolvePost({})
+  })
+
+  it('discloses mock-classifier provenance when a finding/session carries a classifier-derived mechanism', async () => {
+    // Security/honesty fix: this screen shows dominant_failure_mode and
+    // detected_mechanisms (classifier output) but, unlike Session
+    // Detail/AI Quality, never disclosed when that classifier is a mock.
+    // Explicitly reset apiGet to the default fixture responses -- an
+    // earlier test in this file overrides it to 404 the release-summary
+    // request and nothing resets that between tests.
+    vi.mocked(apiGet).mockImplementation(apiGetMockImpl)
+
+    renderWithProviders(<ReleaseDecision />, { route: `/experiments/${EXPERIMENT_ID}/release`, path: '/experiments/:experimentId/release' })
+    await waitFor(() => expect(screen.getByText(/Deterministic mock classifier/i)).toBeInTheDocument())
+  })
+
+  it('makes a weak-confidence SHIP visually distinct from a strong-confidence one, never plain green', async () => {
+    // Honesty fix: a SHIP verdict backed by "weak" confidence is a
+    // fundamentally different claim than a "strong" one and must not
+    // render as the same solid, unqualified green chip.
+    vi.mocked(apiGet).mockImplementation((path, params) => {
+      if (path === `/api/v1/domains/${DOMAIN}/experiments/${EXPERIMENT_ID}/release-summary`) {
+        return Promise.resolve({
+          ...RELEASE_SUMMARY_FIXTURE,
+          decision: { ...RELEASE_SUMMARY_FIXTURE.decision, verdict: 'SHIP', raw_verdict: 'SHIP', confidence: 'weak' },
+        })
+      }
+      return apiGetMockImpl(path, params)
+    })
+
+    renderWithProviders(<ReleaseDecision />, { route: `/experiments/${EXPERIMENT_ID}/release`, path: '/experiments/:experimentId/release' })
+    const verdictChip = await screen.findByText('SHIP')
+    expect(verdictChip).toHaveClass('chip-warning')
+    expect(verdictChip).not.toHaveClass('chip-positive')
   })
 })

@@ -34,6 +34,13 @@ vi.mock('../api/client', async () => {
     if (path === '/api/v1/domains/commerce/review-queue') {
       return { domain: 'commerce', items: currentItems, total: currentItems.length, limit: 25, offset: 0 }
     }
+    if (path === '/ai-quality/classifier-evaluation') {
+      return {
+        provenance: { classifier_type: 'rule_based_mock', classifier_version: 'rule_based_mock-v1', provider: null, model: null, is_mock: true, evaluation_status: 'not_evaluated', run_at: null },
+        n_sessions_evaluated: null, overall_accuracy: null, mean_confidence_correct: null, mean_confidence_incorrect: null,
+        per_class_metrics: [], acceptance_bars: [], all_acceptance_bars_met: null, hybrid_evaluation: null,
+      }
+    }
     throw new Error(`Unmocked path in test: ${path}`)
   })
   const apiPost = vi.fn(async (path: string, body: unknown) => {
@@ -75,5 +82,11 @@ describe('ReviewQueue', () => {
     currentItems = []
     renderWithProviders(<ReviewQueue />)
     await waitFor(() => expect(screen.getByText(/Nothing to review/)).toBeInTheDocument())
+  })
+
+  it('discloses the mock-classifier provenance on this screen too, not just Session Detail/AI Quality', async () => {
+    currentItems = [QUEUE_ITEM]
+    renderWithProviders(<ReviewQueue />)
+    await waitFor(() => expect(screen.getByText(/Deterministic mock classifier/i)).toBeInTheDocument())
   })
 })

@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.app.routers import ai_quality, alerts, audit, auth, domains, experiments, ingestion, investigation, langfuse_connector, monitoring, notifications, ops, postgres_business_connector, review, sessions
+from backend.app.routers import ai_quality, alerts, audit, auth, domains, ingestion, langfuse_connector, monitoring, notifications, ops, postgres_business_connector, review
 from backend.app.schemas.common import ErrorResponse
 from backend.app.warmup import run_startup_warmup
 from backend.monitoring.scheduler import MonitoringScheduler, scheduler_enabled_via_env
@@ -89,9 +89,26 @@ async def validation_exception_handler(request, exc: RequestValidationError) -> 
 
 
 app.include_router(auth.router)
-app.include_router(experiments.router)
-app.include_router(investigation.router)
-app.include_router(sessions.router)
+# Security fix: experiments.router, investigation.router, and
+# sessions.router (pre-Stage-7, org/project-scoping-refactor-era legacy
+# routers) are deliberately NOT mounted -- their routes took only
+# get_current_user (any authenticated user of ANY org) and looked records
+# up by bare UUID with no project/org ownership check at all, so any
+# signed-in user who obtained another org's experiment or session id
+# (leaked link, shared screenshot) could read that org's full metrics,
+# investigation findings, and raw session transcripts. The frontend never
+# called these bare paths (it only uses /api/v1/domains/{domain}/...,
+# which does enforce real membership via get_project_context), and the
+# only other thing that referenced these two modules was a handful of
+# pure helper functions (backend.app.routers.experiments._status_chip/
+# _to_schema/_get_full_metric_table_cached, .investigation._run_investigation_cached)
+# reused by domains.py/warmup.py -- those imports still work with the
+# modules unmounted. ai_quality.router stays mounted: its one
+# project-scoped-data route (GET /experiments/{id}/ai-quality) was
+# removed from that module for the same reason, but GET
+# /ai-quality/classifier-evaluation (the live frontend's only call into
+# this router) reads only a global, non-tenant classifier benchmark
+# artifact, never a customer's data, so it was never part of this bug.
 app.include_router(ai_quality.router)
 app.include_router(ingestion.router)
 app.include_router(domains.router)

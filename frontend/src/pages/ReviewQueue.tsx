@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useDomainMechanisms, useGenericExperiments, useReviewQueue, useSubmitReview, type ReviewQueueFilters } from '../api/hooks'
+import { useClassifierEvaluation, useDomainMechanisms, useGenericExperiments, useReviewQueue, useSubmitReview, type ReviewQueueFilters } from '../api/hooks'
 import type { ReviewQueueItem } from '../api/types'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
+import { MockClassifierBanner } from '../components/common/MockClassifierBanner'
 import { useActiveProject } from '../state/ActiveProjectContext'
 
 const PAGE_SIZE = 25
@@ -120,6 +121,7 @@ export function ReviewQueue() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { data: experimentsData } = useGenericExperiments(domain, projectId)
   const { data: mechanismsData } = useDomainMechanisms(domain, projectId)
+  const { data: classifierEval } = useClassifierEvaluation()
 
   const offset = Number(searchParams.get('offset') ?? '0')
   const experimentId = searchParams.get('experiment_id') ?? undefined
@@ -155,6 +157,8 @@ export function ReviewQueue() {
         <h1>{t('reviewQueue.title')}</h1>
         <p className="text-secondary">{t('reviewQueue.subtitle')}</p>
       </div>
+
+      {classifierEval && <MockClassifierBanner provenance={classifierEval.provenance} />}
 
       <div className="card">
         <div className="card-header"><h2>{t('reviewQueue.filters')}</h2></div>

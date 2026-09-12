@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useCreateReleaseEvaluation, useReleaseHistory, useReleaseSummary } from '../api/hooks'
+import { useClassifierEvaluation, useCreateReleaseEvaluation, useReleaseHistory, useReleaseSummary } from '../api/hooks'
 import { ApiError } from '../api/client'
 import type { DataQualityStatus, ReleaseVerdict } from '../api/types'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
+import { MockClassifierBanner } from '../components/common/MockClassifierBanner'
 import { ReleaseTrendChart } from '../components/common/ReleaseTrendChart'
 import { SegmentEffectChart } from '../components/common/SegmentEffectChart'
 import { formatDateTime, formatPValue, humanizeMetricName, humanizeSegmentLabel } from '../lib/format'
@@ -79,6 +80,7 @@ export function ReleaseDecision() {
   const projectId = activeProject?.project_id
   const { data, isLoading, error } = useReleaseSummary(domain, projectId, experimentId)
   const { data: history } = useReleaseHistory(domain, projectId, experimentId)
+  const { data: classifierEval } = useClassifierEvaluation()
 
   // Stage 17 task 10: a 404 here means "this experiment has no release
   // evaluation yet" -- an expected, common state (a brand-new experiment
@@ -106,8 +108,24 @@ export function ReleaseDecision() {
 
   const { decision, explanation_text, evidence_hierarchy, findings, representative_sessions, economics, data_quality_status, monitoring_window } = data
 
+  // Security/honesty fix: findings' dominant_failure_mode and
+  // representative sessions' detected_mechanisms are classifier output --
+  // this screen must disclose when that output is a mock, the same way
+  // SessionDetail/AIQuality already do, instead of presenting a
+  // mock-derived mechanism as if it were real classification quality.
+  const showsClassifierDerivedData = findings.some((f) => f.dominant_failure_mode !== null) || representative_sessions.some((s) => s.detected_mechanisms.length > 0)
+
+  // Honesty fix: a "weak" confidence SHIP is a fundamentally different
+  // claim than a "strong" one -- rendering both as the same solid green
+  // chip next to plain secondary-colored confidence text let a weak-
+  // confidence SHIP read as just as trustworthy as a strong one. The
+  // verdict itself never changes (still SHIP, still whatever the
+  // deterministic rule table decided) -- only its visual weight does.
+  const isWeakShip = decision.verdict === 'SHIP' && decision.confidence === 'weak'
+
   return (
     <div className="page">
+      {showsClassifierDerivedData && classifierEval && <MockClassifierBanner provenance={classifierEval.provenance} />}
       {/* -- verdict, prominently -- */}
       <div className="page-hero" style={{ background: VERDICT_HERO_BG[decision.verdict] }}>
         {/* Stage 20: kept inside the hero's own bounds -- a rotated
@@ -116,7 +134,7 @@ export function ReleaseDecision() {
         <div className="deco deco-bar" aria-hidden="true" style={{ width: 110, height: 20, top: 20, right: 14, background: 'var(--color-cyan)', opacity: 0.5 }} />
         <div className="page-hero-content" style={{ display: 'flex', alignItems: 'flex-end', gap: 20, justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
-            <span className={`chip chip-verdict ${VERDICT_CLASS[decision.verdict]}`}>
+            <span className={`chip chip-verdict ${isWeakShip ? 'chip-warning' : VERDICT_CLASS[decision.verdict]}`}>
               {decision.verdict}
             </span>
             <div>
@@ -125,7 +143,13 @@ export function ReleaseDecision() {
                 {decision.raw_verdict !== decision.verdict && (
                   <span>{t('releaseDecision.underlyingVerdict', { verdict: decision.raw_verdict })}</span>
                 )}
-                {t('releaseDecision.confidence', { confidence: decision.confidence.replace('_', ' ') })}
+                {isWeakShip ? (
+                  <span className="chip chip-warning" style={{ fontSize: 11 }}>
+                    {t('releaseDecision.confidence', { confidence: decision.confidence.replace('_', ' ') })}
+                  </span>
+                ) : (
+                  t('releaseDecision.confidence', { confidence: decision.confidence.replace('_', ' ') })
+                )}
               </p>
             </div>
           </div>

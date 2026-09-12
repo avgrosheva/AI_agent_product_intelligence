@@ -1,37 +1,16 @@
-"""Integration tests for /ai-quality* endpoints."""
+"""Integration tests for /ai-quality/classifier-evaluation.
+
+Security fix: this file used to also cover GET
+/experiments/{experiment_id}/ai-quality, removed from
+backend.app.routers.ai_quality because it had no project/org ownership
+check (see that module's docstring). The equivalent, project-scoped
+data is covered by tests/test_generic_domain_api.py's
+test_generic_ai_quality_endpoint_on_commerce/_on_support against GET
+/api/v1/domains/{domain}/experiments/{experiment_id}/ai-quality."""
 
 from __future__ import annotations
 
-from backend.llm.client import DETERMINISTIC_MECHANISMS, FAILURE_MECHANISMS, FAILURE_TAXONOMY
-
-
-def test_ai_quality_summary_schema(api_client, experiment_id):
-    resp = api_client.get(f"/experiments/{experiment_id}/ai-quality")
-    assert resp.status_code == 200
-    body = resp.json()
-    items = body["failure_mechanism_prevalence"]
-    modes = {item["failure_mode"] for item in items}
-    assert modes == set(FAILURE_MECHANISMS)
-    for item in items:
-        expected_source = "deterministic" if item["failure_mode"] in DETERMINISTIC_MECHANISMS else "mock_llm"
-        assert item["detector_source"] == expected_source
-    assert body["tool_use_quality"]["tool_calls_per_session_v1"] > 0
-    assert body["classifier_provenance"]["is_mock"] is True
-
-
-def test_ai_quality_trajectory_patterns_pair_frequency_with_outcome(api_client, experiment_id):
-    """METRICS.md's 'not an observability platform' stance: every pattern
-    row must carry an outcome rate alongside frequency, never frequency alone."""
-    resp = api_client.get(f"/experiments/{experiment_id}/ai-quality")
-    patterns = resp.json()["trajectory_patterns"]
-    assert len(patterns) > 0
-    for p in patterns:
-        assert "abandonment_rate_v1" in p and "abandonment_rate_v2" in p
-
-
-def test_ai_quality_unknown_experiment_404(api_client):
-    resp = api_client.get("/experiments/00000000-0000-0000-0000-000000000000/ai-quality")
-    assert resp.status_code == 404
+from backend.llm.client import FAILURE_TAXONOMY
 
 
 def test_classifier_evaluation_endpoint(api_client):
