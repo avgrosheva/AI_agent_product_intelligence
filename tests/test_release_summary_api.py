@@ -76,7 +76,7 @@ def test_rollback_release_summary_schema_and_evidence_ordering(api_client, suppo
     assert decision["economics_impact"] is not None  # cost_usd/revenue_usd were ingested
 
     # -- deterministic explanation --------------------------------------
-    assert body["explanation_text"].startswith("ROLLBACK because resolution_rate decreased by")
+    assert body["explanation_text"].startswith("ROLLBACK because resolution rate decreased by")
 
     # -- evidence hierarchy: fixed category order -----------------------
     categories_seen = [item["category"] for item in body["evidence_hierarchy"]]
@@ -118,7 +118,7 @@ def test_ship_release_summary_has_empty_negative_evidence(api_client, support_pr
 
     body = api_client.get(f"/api/v1/domains/support/experiments/{exp_id}/release-summary?project_id={support_project_id}").json()
     assert body["decision"]["verdict"] == "SHIP"
-    assert body["explanation_text"].startswith("SHIP because resolution_rate increased by")
+    assert body["explanation_text"].startswith("SHIP because resolution rate increased by")
     assert body["findings"] == []
     assert body["representative_sessions"] == []
     categories = [item["category"] for item in body["evidence_hierarchy"]]

@@ -256,7 +256,7 @@ export function Sessions() {
                       <td>{s.outcome ? <span className={`chip ${OUTCOME_CHIP[s.outcome] ?? 'chip-neutral'}`}>{s.outcome.replace(/_/g, ' ')}</span> : '—'}</td>
                       {mechanisms.length > 0 && (
                         <td className="text-secondary" style={{ fontSize: 11.5 }}>
-                          {s.detected_mechanisms.length > 0 ? s.detected_mechanisms.join(', ') : '—'}
+                          {s.detected_mechanisms.length > 0 ? s.detected_mechanisms.map((m) => m.replace(/_/g, ' ')).join(', ') : '—'}
                         </td>
                       )}
                       {mechanisms.length > 0 && (

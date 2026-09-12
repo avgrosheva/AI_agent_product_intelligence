@@ -54,7 +54,7 @@ export function MechanismPanel({
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <h3 style={{ marginBottom: 10 }}>{t('mechanismPanel.excessAttribution')}</h3>
           {!fa.reportable && (
             <p className="text-muted" style={{ fontSize: 12 }}>
@@ -71,7 +71,7 @@ export function MechanismPanel({
           )}
         </div>
 
-        <div>
+        <div style={{ minWidth: 0 }}>
           <h3 style={{ marginBottom: 10 }}>{t('mechanismPanel.trajectoryEvidence')}</h3>
           {finding.trajectory_associations.length === 0 && (
             <p className="text-muted" style={{ fontSize: 12 }}>{t('mechanismPanel.noTrajectoryPattern')}</p>
@@ -79,7 +79,7 @@ export function MechanismPanel({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {finding.trajectory_associations.map((traj) => (
               <div key={traj.pattern} style={{ fontSize: 12 }}>
-                <span className="mono">{traj.pattern}</span>
+                <span className="mono" style={{ overflowWrap: 'anywhere' }}>{traj.pattern}</span>
                 <div className="text-secondary">
                   {t('mechanismPanel.trajectoryStats', { n: traj.n_sessions, rate: formatPercent(traj.pattern_outcome_rate), baseline: formatPercent(traj.baseline_outcome_rate) })}{' '}
                   {traj.bh_significant ? <span className="chip chip-accent" style={{ marginLeft: 4 }}>{t('mechanismPanel.bhSignificant')}</span> : <span className="text-muted">{t('mechanismPanel.notSignificantAfterCorrection')}</span>}

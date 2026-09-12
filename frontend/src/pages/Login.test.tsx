@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Login } from './Login'
 import { AuthProvider } from '../state/AuthContext'
 import { LanguageProvider } from '../state/LanguageContext'
@@ -18,16 +19,19 @@ describe('Login', () => {
     const { apiPost } = await import('../api/client')
     vi.mocked(apiPost).mockResolvedValueOnce({ access_token: 'fresh-token', token_type: 'bearer' })
 
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
-      <ThemeProvider>
-        <LanguageProvider>
-          <MemoryRouter initialEntries={['/login']}>
-            <AuthProvider>
-              <Login />
-            </AuthProvider>
-          </MemoryRouter>
-        </LanguageProvider>
-      </ThemeProvider>,
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <LanguageProvider>
+            <MemoryRouter initialEntries={['/login']}>
+              <AuthProvider>
+                <Login />
+              </AuthProvider>
+            </MemoryRouter>
+          </LanguageProvider>
+        </ThemeProvider>
+      </QueryClientProvider>,
     )
 
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'demo@example.com' } })
@@ -42,16 +46,19 @@ describe('Login', () => {
     const { apiPost, ApiError } = await import('../api/client')
     vi.mocked(apiPost).mockRejectedValueOnce(new ApiError(401, 'invalid email or password'))
 
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
-      <ThemeProvider>
-        <LanguageProvider>
-          <MemoryRouter initialEntries={['/login']}>
-            <AuthProvider>
-              <Login />
-            </AuthProvider>
-          </MemoryRouter>
-        </LanguageProvider>
-      </ThemeProvider>,
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <LanguageProvider>
+            <MemoryRouter initialEntries={['/login']}>
+              <AuthProvider>
+                <Login />
+              </AuthProvider>
+            </MemoryRouter>
+          </LanguageProvider>
+        </ThemeProvider>
+      </QueryClientProvider>,
     )
 
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'demo@example.com' } })

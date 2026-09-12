@@ -430,3 +430,31 @@ export function useSubmitReview(domain: string | undefined, projectId: string | 
     },
   })
 }
+
+/** Stage 21: lets SessionDetail submit a review decision in place --
+ * previously the only way to confirm/reject/correct an attribution was
+ * the Review Queue table, so opening a session from the queue to read
+ * its full evidence (transcript, tool calls) lost the review controls
+ * entirely and forced a trip back. Invalidates this session's own
+ * query (so its status updates immediately) and every review-queue
+ * view regardless of filters (a prefix match, not the exact-filters
+ * key useSubmitReview uses), since which queue view the user came from
+ * isn't known here. */
+export function useSubmitSessionReview(domain: string | undefined, projectId: string | undefined, sessionId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ failureMode, decision, correctedMechanism, note }: {
+      failureMode: string
+      decision: ReviewDecision
+      correctedMechanism?: string
+      note?: string
+    }) =>
+      apiPost<Review>(`/api/v1/domains/${domain}/sessions/${sessionId}/attributions/${failureMode}/review`, {
+        decision, corrected_mechanism: correctedMechanism, note,
+      }, { project_id: projectId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['domain-session', domain, projectId, sessionId] })
+      queryClient.invalidateQueries({ queryKey: ['review-queue'] })
+    },
+  })
+}

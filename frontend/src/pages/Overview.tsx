@@ -80,7 +80,16 @@ export function Overview() {
 
   if (expLoading) return <div className="page"><LoadingState label={t('overview.loadingExperiments')} /></div>
   if (expError) return <div className="page"><ErrorState error={expError} /></div>
-  if (!activeExperiment) return <div className="page"><EmptyState>{t('overview.noExperiments')}</EmptyState></div>
+  if (!activeExperiment) {
+    return (
+      <div className="page">
+        <EmptyState>{t('overview.noExperiments')}</EmptyState>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <Link to="/project" className="btn btn-primary">{t('overview.checkProjectSetup')}</Link>
+        </div>
+      </div>
+    )
+  }
 
   const statusMeta = STATUS_META[activeExperiment.status_chip]
   const northStar = activeExperiment.north_star_metric
@@ -123,7 +132,7 @@ export function Overview() {
                 ? t('overview.movedSignificantly', { metric: humanizeMetricName(northStar.metric_name) })
                 : t('overview.flatInconclusive', { metric: humanizeMetricName(northStar.metric_name) })}{' '}
               {guardrails?.any_breach
-                ? t('overview.guardrailBreachedSummary', { names: guardrails.checks.filter((g) => g.breached).map((g) => g.name).join(', ') })
+                ? t('overview.guardrailBreachedSummary', { names: guardrails.checks.filter((g) => g.breached).map((g) => humanizeMetricName(g.name)).join(', ') })
                 : t('overview.noGuardrailBreached')}{' '}
               {t('overview.needsSegmentInvestigation')}
             </p>

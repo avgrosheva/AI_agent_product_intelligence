@@ -29,16 +29,14 @@ function AlertRow({ alert, projectId, filters }: { alert: Alert; projectId: stri
       <td style={{ maxWidth: 320, fontSize: 12.5 }}>{alert.reason}</td>
       <td className="text-secondary" style={{ fontSize: 11.5 }}>
         <div className="mono">{alert.experiment_id.slice(0, 8)}…</div>
-        {alert.related_guardrail && <div>{t('alerts.guardrail', { value: alert.related_guardrail })}</div>}
+        {alert.related_guardrail && <div>{t('alerts.guardrail', { value: humanizeMetricName(alert.related_guardrail) })}</div>}
         {alert.related_finding && <div>{t('alerts.finding', { value: alert.related_finding })}</div>}
       </td>
       <td>
-        <span className={`chip ${alert.status === 'open' ? 'chip-warning' : 'chip-positive'}`}>{alert.status}</span>
-        {alert.acknowledged_at && <div className="text-muted" style={{ fontSize: 10.5, marginTop: 2 }}>{formatDateTime(alert.acknowledged_at)}</div>}
-      </td>
-      <td>
-        {alert.status === 'open' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+          <span className={`chip ${alert.status === 'open' ? 'chip-warning' : 'chip-positive'}`}>{alert.status}</span>
+          {alert.acknowledged_at && <div className="text-muted" style={{ fontSize: 10.5 }}>{formatDateTime(alert.acknowledged_at)}</div>}
+          {alert.status === 'open' && (
             <button
               type="button"
               className="btn btn-small"
@@ -52,9 +50,9 @@ function AlertRow({ alert, projectId, filters }: { alert: Alert; projectId: stri
             >
               {acknowledge.isPending ? t('alerts.acknowledging') : t('alerts.acknowledge')}
             </button>
-            {errorText && <span className="chip chip-negative" style={{ fontSize: 10.5 }}>{errorText}</span>}
-          </div>
-        )}
+          )}
+          {errorText && <span className="chip chip-negative" style={{ fontSize: 10.5 }}>{errorText}</span>}
+        </div>
       </td>
     </tr>
   )
@@ -156,7 +154,6 @@ export function Alerts() {
                     <th>{t('alerts.reason')}</th>
                     <th>{t('alerts.context')}</th>
                     <th>{t('alerts.status')}</th>
-                    <th></th>
                   </tr>
                 </thead>
                 <tbody>

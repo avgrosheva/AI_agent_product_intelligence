@@ -99,6 +99,7 @@
     "statusNotYetInvestigated": "Ещё не расследовано",
     "loadingExperiments": "Загрузка экспериментов…",
     "noExperiments": "Для этого проекта пока не найдено ни одного эксперимента.",
+    "checkProjectSetup": "Проверить настройку проекта →",
     "controlLabel": "контроль",
     "treatmentLabel": "тест",
     "primaryMetricKicker": "Ключевая метрика · North star",
@@ -226,6 +227,7 @@
   "releaseDecision": {
     "evaluationFailed": "Не удалось выполнить оценку.",
     "evaluating": "Оценка…",
+    "evaluatingHint": "Пересчитываются статистика и guardrails — это может занять до минуты.",
     "evaluateNow": "Оценить сейчас",
     "loading": "Загрузка решения о релизе…",
     "noEvaluationYet": "Для этого эксперимента ещё не выполнялась оценка релиза.",

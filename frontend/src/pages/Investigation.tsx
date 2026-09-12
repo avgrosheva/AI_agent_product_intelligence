@@ -120,7 +120,7 @@ export function Investigation() {
         </div>
       )}
 
-      {isLoading && <LoadingState label={t('investigation.runningInvestigation', { metric })} />}
+      {isLoading && <LoadingState label={t('investigation.runningInvestigation', { metric: humanizeMetricName(metric) })} />}
       {error && <ErrorState error={error} />}
 
       {inv && (

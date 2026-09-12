@@ -114,28 +114,39 @@ def _pct_point(value: float | None) -> str:
     return f"{abs(value) * 100:.1f}pp" if value is not None else "an unmeasured amount"
 
 
+def _humanize(name: str) -> str:
+    """Renders an internal snake_case metric/guardrail identifier as a
+    plain phrase (e.g. "p95_latency" -> "p95 latency") for the one place
+    (generate_explanation_text) where these names are read as prose
+    rather than shown as labels next to a value — the frontend's own
+    humanizeMetricName (lib/format.ts) does the equivalent job for
+    labels, but title-cases them, which reads wrong mid-sentence."""
+    return name.replace("_", " ")
+
+
 def generate_explanation_text(decision: DecisionSummary) -> str:
     """Task 6: a short, deterministic sentence built only from already-
-    computed fields — e.g. "ROLLBACK because resolution_rate decreased
-    by 60.0pp and escalation_rate_guardrail breached its blocking
+    computed fields — e.g. "ROLLBACK because resolution rate decreased
+    by 60.0pp and escalation rate guardrail breached its blocking
     guardrail." No LLM involved; this is the ONLY explanation the API
     ever returns unless a caller explicitly asks for an optional
     secondary LLM gloss (not implemented here — task 6 allows but does
     not require one, and none of the structured fields may ever be
     replaced by it)."""
+    primary_metric_label = _humanize(decision.primary_metric)
     delta = decision.primary_metric_delta
     if delta is None:
-        change_clause = f"{decision.primary_metric} could not be measured"
+        change_clause = f"{primary_metric_label} could not be measured"
     elif delta > 0:
-        change_clause = f"{decision.primary_metric} increased by {_pct_point(delta)}"
+        change_clause = f"{primary_metric_label} increased by {_pct_point(delta)}"
     elif delta < 0:
-        change_clause = f"{decision.primary_metric} decreased by {_pct_point(delta)}"
+        change_clause = f"{primary_metric_label} decreased by {_pct_point(delta)}"
     else:
-        change_clause = f"{decision.primary_metric} was unchanged"
+        change_clause = f"{primary_metric_label} was unchanged"
 
     clauses = [change_clause]
 
-    blocking_names = [g["name"] for g in decision.breached_guardrails if g.get("severity") == "blocking"]
+    blocking_names = [_humanize(g["name"]) for g in decision.breached_guardrails if g.get("severity") == "blocking"]
     if blocking_names:
         joined = " and ".join(blocking_names)
         clauses.append(f"{joined} breached its blocking guardrail" if len(blocking_names) == 1 else f"{joined} breached their blocking guardrails")

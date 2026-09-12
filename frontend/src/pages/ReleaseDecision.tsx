@@ -55,6 +55,7 @@ function EvaluateNowButton({ domain, projectId, experimentId }: { domain: string
       >
         {createEvaluation.isPending ? t('releaseDecision.evaluating') : t('releaseDecision.evaluateNow')}
       </button>
+      {createEvaluation.isPending && <span className="text-muted" style={{ fontSize: 11.5, maxWidth: 260, textAlign: 'right' }}>{t('releaseDecision.evaluatingHint')}</span>}
       {errorText && <span className="text-muted" style={{ fontSize: 11.5, maxWidth: 260, textAlign: 'right' }}>{errorText}</span>}
     </div>
   )
@@ -262,7 +263,7 @@ export function ReleaseDecision() {
                 </div>
                 <p className="text-secondary" style={{ fontSize: 12.5, margin: '4px 0' }}>
                   {f.metric}: v1={f.v1_value !== null ? (f.v1_value * 100).toFixed(1) : '—'}% → v2={f.v2_value !== null ? (f.v2_value * 100).toFixed(1) : '—'}% ({formatSignedPct(f.delta)}), {t('releaseDecision.excessContribution', { value: f.excess_contribution?.toFixed(4) ?? '—' })}
-                  {f.dominant_failure_mode && <> · {t('releaseDecision.mechanism', { value: f.dominant_failure_mode })}</>}
+                  {f.dominant_failure_mode && <> · {t('releaseDecision.mechanism', { value: f.dominant_failure_mode.replace(/_/g, ' ') })}</>}
                 </p>
                 <p style={{ fontSize: 12.5 }}>{f.next_action}</p>
               </div>
@@ -286,7 +287,7 @@ export function ReleaseDecision() {
                 </div>
                 <p className="text-secondary" style={{ fontSize: 12, margin: '4px 0' }}>
                   {t('releaseDecision.outcomeSegment', { outcome: s.outcome, segment: humanizeSegmentLabel(s.segment_label) })}
-                  {s.detected_mechanisms.length > 0 && <> · {t('releaseDecision.mechanisms', { value: s.detected_mechanisms.join(', ') })}</>}
+                  {s.detected_mechanisms.length > 0 && <> · {t('releaseDecision.mechanisms', { value: s.detected_mechanisms.map((m) => m.replace(/_/g, ' ')).join(', ') })}</>}
                 </p>
                 <p className="text-muted" style={{ fontSize: 11.5, fontStyle: 'italic' }}>{s.selected_because}</p>
               </div>

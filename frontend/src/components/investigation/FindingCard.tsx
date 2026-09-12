@@ -19,7 +19,7 @@ export function FindingCard({ finding, metricName, experimentId, selected, onSel
   const isLatency = isAndroidLatencySegment(finding)
   const mechanismLabel = isLatency
     ? t('findingCard.elevatedLatency')
-    : (finding.dominant_failure_mode ?? t('findingCard.noneDominant'))
+    : (finding.dominant_failure_mode?.replace(/_/g, ' ') ?? t('findingCard.noneDominant'))
 
   return (
     <div

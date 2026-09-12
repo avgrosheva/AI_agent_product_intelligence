@@ -99,6 +99,7 @@
     "statusNotYetInvestigated": "Not yet investigated",
     "loadingExperiments": "Loading experiments…",
     "noExperiments": "No experiments found for this project yet.",
+    "checkProjectSetup": "Check project setup →",
     "controlLabel": "control",
     "treatmentLabel": "treatment",
     "primaryMetricKicker": "Primary metric · North star",
@@ -226,6 +227,7 @@
   "releaseDecision": {
     "evaluationFailed": "Evaluation failed.",
     "evaluating": "Evaluating…",
+    "evaluatingHint": "Recomputing statistics and guardrails — this can take up to a minute.",
     "evaluateNow": "Evaluate now",
     "loading": "Loading release decision…",
     "noEvaluationYet": "No release evaluation has been run yet for this experiment.",

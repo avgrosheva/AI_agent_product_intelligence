@@ -36,7 +36,9 @@ describe('Sessions page', () => {
     renderWithProviders(<Sessions />, { route: `/sessions?experiment_id=${EXPERIMENT_ID}` })
     await waitFor(() => expect(screen.getByText(/1 sessions match/)).toBeInTheDocument(), LONG_TIMEOUT)
     expect(screen.getByRole('columnheader', { name: 'Mechanisms' })).toBeInTheDocument()
-    expect(screen.getByText('unnecessary_clarification')).toBeInTheDocument()
+    // Two matches are expected: the table cell AND the mechanism filter
+    // dropdown's own option both render this text.
+    expect(screen.getAllByText('unnecessary clarification').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('unreviewed')).toBeInTheDocument()
   })
 

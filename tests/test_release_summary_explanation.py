@@ -24,19 +24,19 @@ def test_rollback_with_guardrail_breach_matches_documented_example_shape():
         breached_guardrails=[{"name": "escalation_rate_guardrail", "severity": "blocking"}],
     )
     text = generate_explanation_text(decision)
-    assert text == "ROLLBACK because resolution_rate decreased by 60.0pp and escalation_rate_guardrail breached its blocking guardrail."
+    assert text == "ROLLBACK because resolution rate decreased by 60.0pp and escalation rate guardrail breached its blocking guardrail."
 
 
 def test_ship_with_no_guardrail_breach():
     decision = _decision(verdict="SHIP", primary_metric_delta=0.109)
     text = generate_explanation_text(decision)
-    assert text == "SHIP because resolution_rate increased by 10.9pp."
+    assert text == "SHIP because resolution rate increased by 10.9pp."
 
 
 def test_hold_with_negative_segment_only():
     decision = _decision(verdict="HOLD", raw_verdict="HOLD", primary_metric_delta=0.0, significant_negative_segment_count=2)
     text = generate_explanation_text(decision)
-    assert text == "HOLD because resolution_rate was unchanged and 2 significant negative segment(s) were found."
+    assert text == "HOLD because resolution rate was unchanged and 2 significant negative segment(s) were found."
 
 
 def test_hold_gated_by_critical_data_quality():
@@ -45,13 +45,13 @@ def test_hold_gated_by_critical_data_quality():
         data_quality_status="critical", data_quality_gated=True,
     )
     text = generate_explanation_text(decision)
-    assert text == "HOLD because resolution_rate increased by 10.0pp and project data quality is critical, so a confident SHIP is withheld."
+    assert text == "HOLD because resolution rate increased by 10.0pp and project data quality is critical, so a confident SHIP is withheld."
 
 
 def test_unmeasurable_primary_metric():
     decision = _decision(primary_metric_delta=None)
     text = generate_explanation_text(decision)
-    assert text == "SHIP because resolution_rate could not be measured."
+    assert text == "SHIP because resolution rate could not be measured."
 
 
 def test_multiple_blocking_guardrails_are_joined():
@@ -60,7 +60,7 @@ def test_multiple_blocking_guardrails_are_joined():
         breached_guardrails=[{"name": "guardrail_a", "severity": "blocking"}, {"name": "guardrail_b", "severity": "blocking"}],
     )
     text = generate_explanation_text(decision)
-    assert "guardrail_a and guardrail_b breached their blocking guardrails" in text
+    assert "guardrail a and guardrail b breached their blocking guardrails" in text
 
 
 def test_non_blocking_guardrail_breach_is_not_mentioned_in_text():

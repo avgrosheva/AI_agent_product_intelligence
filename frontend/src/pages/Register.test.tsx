@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Register } from './Register'
 import { AuthProvider } from '../state/AuthContext'
 import { LanguageProvider } from '../state/LanguageContext'
@@ -13,16 +14,19 @@ vi.mock('../api/client', async () => {
 })
 
 function renderRegister() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <ThemeProvider>
-      <LanguageProvider>
-        <MemoryRouter initialEntries={['/register']}>
-          <AuthProvider>
-            <Register />
-          </AuthProvider>
-        </MemoryRouter>
-      </LanguageProvider>
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <LanguageProvider>
+          <MemoryRouter initialEntries={['/register']}>
+            <AuthProvider>
+              <Register />
+            </AuthProvider>
+          </MemoryRouter>
+        </LanguageProvider>
+      </ThemeProvider>
+    </QueryClientProvider>,
   )
 }
 

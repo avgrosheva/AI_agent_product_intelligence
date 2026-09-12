@@ -1,5 +1,24 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { apiPost, clearRefreshToken, clearToken, getRefreshToken, getToken, setRefreshToken, setToken } from '../api/client'
+
+/** Stage 21: every project/experiment-selection key this app persists is
+ * namespaced under this prefix (ActiveProjectContext's `aipi.activeProjectId`,
+ * ActiveExperimentContext's `aipi.activeExperimentId.<projectId>`) -- unlike
+ * the device-level `theme`/`language` keys, these describe what the
+ * PREVIOUS account was looking at and must not leak into a different
+ * account's first render after a login on the same browser. */
+const ACCOUNT_SCOPED_STORAGE_PREFIX = 'aipi.'
+
+function clearAccountScopedStorage() {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(ACCOUNT_SCOPED_STORAGE_PREFIX)) localStorage.removeItem(key)
+    }
+  } catch {
+    // best-effort only
+  }
+}
 
 interface TokenResponse {
   access_token: string
@@ -17,6 +36,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setTokenState] = useState<string | null>(() => getToken())
+  const queryClient = useQueryClient()
 
   const login = useCallback(async (email: string, password: string) => {
     const response = await apiPost<TokenResponse>('/api/v1/auth/login', { email, password })
@@ -41,7 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearToken()
     clearRefreshToken()
     setTokenState(null)
-  }, [])
+    // Stage 21: without this, a different account logging in right after
+    // on the same browser briefly saw the PREVIOUS account's cached
+    // `/auth/me` response and persisted project selection -- react-query
+    // serves stale cache instantly while the fresh request is in flight,
+    // so for one render the new session queried the old account's
+    // project_id (observed as a stray 403 in the backend log right after
+    // switching accounts).
+    queryClient.clear()
+    clearAccountScopedStorage()
+  }, [queryClient])
 
   const value = useMemo(() => ({ isAuthenticated: token !== null, login, logout }), [token, login, logout])
 

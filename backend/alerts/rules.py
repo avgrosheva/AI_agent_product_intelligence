@@ -15,6 +15,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def _humanize(name: str) -> str:
+    """Renders an internal snake_case metric/guardrail/segment identifier
+    as a plain phrase (e.g. "p95_latency" -> "p95 latency") for the one
+    place these names are read as prose rather than shown as a label next
+    to a value -- mirrors backend.release.summary._humanize, which does
+    the same job for the release-decision explanation sentence."""
+    return name.replace("_", " ")
+
+
 @dataclass(frozen=True)
 class CandidateAlert:
     rule: str
@@ -37,7 +46,7 @@ def evaluate_alert_rules(status: str, fields: dict, primary_metric: str) -> list
             CandidateAlert(
                 rule="rollback",
                 severity="critical",
-                reason=f"'{primary_metric}' is significantly worse in v2 (roll_back verdict) — release should be rolled back.",
+                reason=f"'{_humanize(primary_metric)}' is significantly worse in v2 (roll_back verdict) — release should be rolled back.",
                 related_guardrail=None,
                 related_finding=None,
                 dedup_key="rollback",
@@ -51,7 +60,7 @@ def evaluate_alert_rules(status: str, fields: dict, primary_metric: str) -> list
             CandidateAlert(
                 rule="blocking_guardrail_breach",
                 severity="critical",
-                reason=f"Blocking guardrail '{guardrail['name']}' breached ({guardrail['threshold_description']}): v1={guardrail['v1_value']}, v2={guardrail['v2_value']}.",
+                reason=f"Blocking guardrail '{_humanize(guardrail['name'])}' breached ({guardrail['threshold_description']}): v1={guardrail['v1_value']}, v2={guardrail['v2_value']}.",
                 related_guardrail=guardrail["name"],
                 related_finding=None,
                 dedup_key=f"guardrail:{guardrail['name']}",
@@ -69,7 +78,7 @@ def evaluate_alert_rules(status: str, fields: dict, primary_metric: str) -> list
                 severity="warning",
                 reason=(
                     f"Hold verdict with a significant negative segment"
-                    + (f": '{related_finding}'." if related_finding else ".")
+                    + (f": '{_humanize(related_finding)}'." if related_finding else ".")
                 ),
                 related_guardrail=None,
                 related_finding=related_finding,

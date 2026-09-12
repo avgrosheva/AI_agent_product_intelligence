@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useClassifierEvaluation, useDomainSessionDetail } from '../api/hooks'
+import { useClassifierEvaluation, useDomainMechanisms, useDomainSessionDetail, useSubmitSessionReview } from '../api/hooks'
+import type { GenericFailureAttribution } from '../api/types'
 import { EmptyState, ErrorState, LoadingState } from '../components/common/States'
 import { MockClassifierBanner } from '../components/common/MockClassifierBanner'
 import { formatDateTime } from '../lib/format'
@@ -13,6 +14,86 @@ const OUTCOME_CHIP: Record<string, string> = {
   purchase: 'chip-positive',
   abandoned: 'chip-negative',
   escalated: 'chip-negative',
+}
+
+/** Stage 21: the confirm/reject/correct controls the Review Queue table
+ * offers, reachable from right where the evidence (transcript, tool
+ * calls) that a reviewer actually needs to decide is already shown --
+ * without this, reading that evidence here meant losing the review
+ * controls and going back to the queue to act on what was just read. */
+function ReviewActions({ domain, projectId, sessionId, attribution, mechanismNames }: {
+  domain: string
+  projectId: string
+  sessionId: string
+  attribution: GenericFailureAttribution
+  mechanismNames: string[]
+}) {
+  const { t } = useTranslation()
+  const [showCorrect, setShowCorrect] = useState(false)
+  const [correctedMechanism, setCorrectedMechanism] = useState('')
+  const [note, setNote] = useState('')
+  const [errorText, setErrorText] = useState<string | null>(null)
+  const submit = useSubmitSessionReview(domain, projectId, sessionId)
+
+  function submitDecision(decision: 'confirmed' | 'rejected', mechanism?: string) {
+    setErrorText(null)
+    submit.mutate(
+      { failureMode: attribution.failure_mode, decision, correctedMechanism: mechanism, note: note || undefined },
+      {
+        onError: (err) => setErrorText(err instanceof Error ? err.message : t('reviewQueue.reviewSubmissionFailed')),
+        onSuccess: () => setShowCorrect(false),
+      },
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start', marginTop: 6 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button type="button" className="btn btn-small" disabled={submit.isPending} onClick={() => submitDecision('confirmed')}>
+          {t('reviewQueue.confirm')}
+        </button>
+        <button type="button" className="btn btn-small" disabled={submit.isPending} onClick={() => submitDecision('rejected')}>
+          {t('reviewQueue.reject')}
+        </button>
+        <button type="button" className="btn btn-small" disabled={submit.isPending} onClick={() => setShowCorrect((v) => !v)} aria-expanded={showCorrect}>
+          {showCorrect ? t('reviewQueue.cancel') : t('reviewQueue.correctEllipsis')}
+        </button>
+      </div>
+      {showCorrect && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select
+            className="filter-input"
+            value={correctedMechanism}
+            onChange={(e) => setCorrectedMechanism(e.target.value)}
+            aria-label={t('reviewQueue.correctedMechanism')}
+          >
+            <option value="">{t('reviewQueue.selectCorrectMechanism')}</option>
+            {mechanismNames.filter((m) => m !== attribution.failure_mode).map((m) => (
+              <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            className="filter-input"
+            placeholder={t('reviewQueue.noteOptional')}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            style={{ width: 160 }}
+            aria-label={t('reviewQueue.reviewNote')}
+          />
+          <button
+            type="button"
+            className="btn btn-small btn-primary"
+            disabled={submit.isPending || !correctedMechanism}
+            onClick={() => submitDecision('rejected', correctedMechanism)}
+          >
+            {t('reviewQueue.submitCorrection')}
+          </button>
+        </div>
+      )}
+      {errorText && <span className="chip chip-negative" style={{ fontSize: 10.5 }}>{errorText}</span>}
+    </div>
+  )
 }
 
 /** Stage 16: domain-generic (previously called the legacy, unscoped
@@ -33,6 +114,8 @@ export function SessionDetail() {
   const projectId = activeProject?.project_id
   const { data: session, isLoading, error } = useDomainSessionDetail(domain, projectId, sessionId)
   const { data: classifierEval } = useClassifierEvaluation()
+  const { data: mechanismsData } = useDomainMechanisms(domain, projectId)
+  const mechanismNames = (mechanismsData?.mechanisms ?? []).map((m) => m.name)
 
   if (isLoading) return <div className="page"><LoadingState label={t('sessionDetail.loadingSession')} /></div>
   if (error) return <div className="page"><ErrorState error={error} /></div>
@@ -83,6 +166,9 @@ export function SessionDetail() {
                   {f.corrected_mechanism && t('sessionDetail.correctedTo', { value: f.corrected_mechanism.replace(/_/g, ' ') })}
                 </div>
                 {f.evidence_text && <p style={{ fontSize: 13 }}>{f.evidence_text}</p>}
+                {f.review_status === 'unreviewed' && domain && projectId && sessionId && (
+                  <ReviewActions domain={domain} projectId={projectId} sessionId={sessionId} attribution={f} mechanismNames={mechanismNames} />
+                )}
               </div>
             ))}
           </div>

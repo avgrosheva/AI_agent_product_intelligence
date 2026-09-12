@@ -1,24 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RequireAuth } from './RequireAuth'
 import { AuthProvider } from '../../state/AuthContext'
 import { clearToken } from '../../api/client'
 
 function renderProtected(route: string) {
   clearToken()
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MemoryRouter initialEntries={[route]}>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<div>Login screen</div>} />
-          <Route path="/welcome" element={<div>Landing screen</div>} />
-          <Route path="/setup" element={<RequireAuth><div>Setup screen</div></RequireAuth>} />
-          <Route path="/project" element={<RequireAuth><div>Overview screen</div></RequireAuth>} />
-          <Route path="/" element={<RequireAuth><div>Root screen</div></RequireAuth>} />
-        </Routes>
-      </AuthProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[route]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<div>Login screen</div>} />
+            <Route path="/welcome" element={<div>Landing screen</div>} />
+            <Route path="/setup" element={<RequireAuth><div>Setup screen</div></RequireAuth>} />
+            <Route path="/project" element={<RequireAuth><div>Overview screen</div></RequireAuth>} />
+            <Route path="/" element={<RequireAuth><div>Root screen</div></RequireAuth>} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 

@@ -398,7 +398,7 @@ export const RELEASE_SUMMARY_FIXTURE: ReleaseSummaryResponse = {
     economics_impact: -0.42,
     confidence: 'strong',
   },
-  explanation_text: 'ROLLBACK because abandonment_rate increased by 15.0pp and p95_latency breached its blocking guardrail.',
+  explanation_text: 'ROLLBACK because abandonment rate increased by 15.0pp and p95 latency breached its blocking guardrail.',
   evidence_hierarchy: [
     { rank: 1, category: 'blocking_guardrail', summary: "Blocking guardrail 'p95_latency' breached (p95 latency increased beyond threshold): v1=1200, v2=2100." },
     { rank: 2, category: 'primary_metric', summary: "Primary metric 'abandonment_rate' regressed by 15.0pp (p=4.00e-04)." },

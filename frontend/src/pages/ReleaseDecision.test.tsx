@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
-import { ApiError, apiGet } from '../api/client'
+import { ApiError, apiGet, apiPost } from '../api/client'
 import { ReleaseDecision } from './ReleaseDecision'
 import { renderWithProviders } from '../test/renderWithProviders'
 import { apiGetMockImpl, DOMAIN, EXPERIMENT_ID } from '../test/fixtures'
@@ -8,14 +8,14 @@ import { apiGetMockImpl, DOMAIN, EXPERIMENT_ID } from '../test/fixtures'
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
   const { apiGetMockImpl } = await import('../test/fixtures')
-  return { ...actual, apiGet: vi.fn(apiGetMockImpl) }
+  return { ...actual, apiGet: vi.fn(apiGetMockImpl), apiPost: vi.fn() }
 })
 
 describe('ReleaseDecision', () => {
   it('shows the verdict prominently and the deterministic explanation', async () => {
     renderWithProviders(<ReleaseDecision />, { route: `/experiments/${EXPERIMENT_ID}/release`, path: '/experiments/:experimentId/release' })
     await waitFor(() => expect(screen.getByText('ROLLBACK')).toBeInTheDocument())
-    expect(screen.getByText(/ROLLBACK because abandonment_rate increased by 15\.0pp/)).toBeInTheDocument()
+    expect(screen.getByText(/ROLLBACK because abandonment rate increased by 15\.0pp/)).toBeInTheDocument()
   })
 
   it('shows the primary metric change, guardrail breach, and economics impact', async () => {
@@ -73,5 +73,20 @@ describe('ReleaseDecision', () => {
     await waitFor(() => expect(screen.getByText(/No release evaluation has been run yet/)).toBeInTheDocument())
     await waitFor(() => expect(screen.getByRole('button', { name: 'Evaluate now' })).toBeInTheDocument())
     expect(screen.queryByText(/Not found/)).not.toBeInTheDocument()
+  })
+
+  it('shows a time-expectation hint while a fresh evaluation is running, not just a bare "Evaluating…" label', async () => {
+    // Stage 21: a real evaluation recomputes the investigation lenses and
+    // can take up to ~90s against demo-scale data -- a bare "Evaluating…"
+    // with no sense of how long that might take reads as a hang.
+    let resolvePost: (value: unknown) => void = () => {}
+    vi.mocked(apiPost).mockReturnValue(new Promise((resolve) => { resolvePost = resolve }))
+
+    renderWithProviders(<ReleaseDecision />, { route: `/experiments/${EXPERIMENT_ID}/release`, path: '/experiments/:experimentId/release' })
+    const evaluateButton = await screen.findByRole('button', { name: 'Evaluate now' })
+    evaluateButton.click()
+
+    await waitFor(() => expect(screen.getByText(/can take up to a minute/i)).toBeInTheDocument())
+    resolvePost({})
   })
 })
