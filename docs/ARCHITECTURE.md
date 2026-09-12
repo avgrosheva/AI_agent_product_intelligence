@@ -2,119 +2,135 @@
 
 ## 1. System overview
 
-```
-┌─────────────────────┐        ┌────────────────────────────────────┐
-│  datagen (offline)  │──────▶ │              PostgreSQL              │
-│  seeded generator    │  load  │  raw tables (DATA_MODEL.md)          │
-└─────────────────────┘        │  + analytics views (METRICS.md)      │
-                                └───────────────┬──────────────────────┘
-                                                │ SQLAlchemy (read) / asyncpg
-                                                ▼
-                                ┌────────────────────────────────────┐
-                                │           FastAPI backend           │
-                                │  routers: experiments, sessions,    │
-                                │  investigation, ai-quality, overview │
-                                │  ├─ analytics/  (SQL + stats, pure)  │
-                                │  ├─ investigation/ (pipeline, §INV)  │
-                                │  └─ llm/ (provider abstraction)      │
-                                └───────────────┬──────────────────────┘
-                                                │ REST/JSON
-                                                ▼
-                                ┌────────────────────────────────────┐
-                                │      Next.js / React frontend       │
-                                │  5 screens, Recharts, shared table/  │
-                                │  metric-card components              │
-                                └────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph Sources["External sources"]
+        LF[Langfuse traces]
+        PG[Postgres business data]
+        GEN[Generic ingestion API]
+    end
+
+    subgraph Core["Core engine"]
+        ADAPT[Domain adapters<br/>commerce · support]
+        STATS[Metrics & statistics]
+        INV[Investigation]
+        ATTR[Failure attribution]
+        ECON[Economics]
+        DQ[Data quality]
+    end
+
+    subgraph Product["Product layer"]
+        REL[Release intelligence]
+        EVID[Evidence & sessions]
+        MON[Monitoring & alerts]
+        REV[Human review]
+        AIQ[AI quality]
+    end
+
+    subgraph Platform["Platform"]
+        AUTH[Auth & tenancy]
+        AUDIT[Audit log]
+        SCHED[Scheduler & cache]
+    end
+
+    UI[Product UI]
+
+    Sources --> ADAPT --> STATS --> INV --> ATTR
+    STATS --> ECON
+    STATS --> DQ
+    INV --> REL
+    ATTR --> REL
+    ECON --> REL
+    DQ --> REL
+    REL --> EVID --> REV --> AIQ
+    REL --> MON
+    Platform -. scopes every request .-> Product
+    Product --> UI
 ```
 
-One backend service, one frontend service, one database, one offline batch generator invoked as a script/CLI (not a running service). No message queue, no cache layer, no separate microservice for the LLM calls (they're a module inside the backend, invoked synchronously at dataset-build/refresh time and cached in `failure_labels`/`evaluations`, not on the request path of any user-facing page — see `AI_EVALUATION.md` §3).
+One backend service (FastAPI), one frontend service (React/Vite), one PostgreSQL database, and an offline synthetic-data generator invoked as a CLI (not a running service). No message queue, no separate microservice for LLM calls — attribution runs as a batch pipeline inside the backend, writing to a table the request path only ever reads from.
 
 ## 2. Why this shape
 
-- **A single backend, not "analytics service" + "API service."** The brief explicitly rules out microservices. Analytics/stats/investigation code is organized as internal Python packages under one FastAPI app, separated by module boundary, not process boundary. This keeps deployment to two containers plus Postgres.
-- **Views over materialization, materialized only where the demo dataset needs the speed.** Most `METRICS.md` metrics are plain SQL views computed on read (Postgres handles ~35k sessions with joins trivially at interactive latency). The one materialized object is `session_trajectories` (`INVESTIGATION.md` §5), refreshed once after dataset load, since trajectory string-concatenation is not naturally expressible as a fast ad hoc view.
-- **Investigation pipeline runs synchronously on request**, not as a background job with polling. At demo scale (~60 bounded tests, `INVESTIGATION.md` §1) this completes in low single-digit seconds, so a simple "click Investigate → loading state → results" UX is honest and avoids building a job queue.
-- **LLM calls are pre-computed, not live-on-click.** Failure classification runs once at dataset build/refresh (`AI_EVALUATION.md` §3); the Investigation page reads cached `failure_labels`. This keeps the demo fast, cheap, and reproducible for interview walkthroughs (no API key required to see the product work, only to regenerate labels).
+- **One backend, organized by module boundary, not process boundary.** Analytics, investigation, attribution, economics, and data-quality logic are internal Python packages under one FastAPI app. This keeps deployment simple (two services plus Postgres) without losing separation of concerns in the code.
+- **Domain adapters, not domain-specific routers.** A generic API (`/api/v1/domains/{domain}/...`) is parameterized by domain; each domain (commerce, support) supplies its own metric registry, guardrails, and segment dimensions through an adapter interface. Adding a domain means writing an adapter, not duplicating routes, statistics, or the investigation engine.
+- **Metrics computed on read where the data size allows, cached where it doesn't.** Most metrics are query functions over indexed tables, fast enough to compute per request at the project's data scale. Investigation's segment scan and the full metric table are cached per project, keyed by a data-version counter that increments on every write — so new data invalidates the cache automatically instead of requiring a restart.
+- **Investigation runs synchronously**, not as a background job with polling. A bounded, pre-registered scan (on the order of tens of statistical tests per run) completes in seconds once cached, and in well under a minute cold — a "click Investigate → loading state → results" UX is honest at this scale.
+- **Failure attribution is pre-computed, not live-on-click.** Classification runs once per session at ingestion/classification time; the Investigation and AI Quality screens read the cached result table. This keeps interactive screens fast and keeps LLM cost bounded and predictable.
+- **Release decisions are deterministic.** A fixed, auditable rule table over already-computed numbers decides SHIP/HOLD/ROLLBACK — never an LLM call in the decision path — so the same stored evaluation always produces the same verdict and the same explanation text.
 
 ## 3. Tech stack and rationale
 
 | Layer | Choice | Why |
 |---|---|---|
-| Backend framework | FastAPI + Pydantic | Typed request/response models double as API docs; matches the brief. |
-| ORM/migrations | SQLAlchemy (2.0 style) + Alembic, one baseline migration | Demonstrates real schema-as-code without simulating a migration history that doesn't exist (`PRD.md` §1.3). |
-| DB | PostgreSQL | Window functions, `jsonb`, and CTEs are used throughout the analytics layer — Postgres is a functional requirement, not just a default. |
-| Analytics | Raw SQL (via SQLAlchemy Core, not the ORM, for analytics queries) + pandas for post-processing/stats | SQL is the graded skill per the brief; pandas/scipy/statsmodels only for what SQL can't express cleanly (bootstrap resampling, BH correction). |
-| Stats | scipy.stats, statsmodels | Standard, checkable implementations (`STATISTICS.md` §10). |
-| Frontend | Next.js (App Router) + React + TypeScript | Brief's preference; also gives file-based routing that maps cleanly to the 5 screens. |
-| Charts | Recharts | Lightweight, sufficient for the required chart types (bar, line, funnel-as-bar, scatter for latency/abandonment). |
-| LLM | Anthropic SDK behind `LLMClient` protocol + rule-based mock | See `AI_EVALUATION.md` §3. |
-| Infra | Docker Compose (postgres, backend, frontend, one-off `datagen` job) | Brief's constraint; no k8s/Kafka. |
-| Testing | pytest (backend: unit tests for stats functions, integration tests for API routes against a test DB, the ground-truth validation suite) + Playwright or Vitest+RTL for a small frontend smoke suite (not exhaustive) | Ground-truth validation is the most important test in the repo; frontend testing is intentionally light per the two-week budget. |
+| Backend framework | FastAPI + Pydantic v2 | Typed request/response models double as API documentation; async-capable where it matters (LLM calls) without forcing it everywhere. |
+| ORM / migrations | SQLAlchemy 2.0 + Alembic | Schema-as-code with a real, evolving migration history. |
+| Database | PostgreSQL 16 | Window functions, `jsonb`, and CTEs are used throughout the analytics layer. |
+| Analytics | SQLAlchemy Core (raw SQL) for queries, pandas for post-processing | SQL for what SQL expresses cleanly; pandas/scipy/statsmodels for cluster-level statistics and bootstrap resampling. |
+| Statistics | scipy.stats, statsmodels | Standard, checkable implementations — see `STATISTICS.md`. |
+| Auth | PyJWT (short-lived access tokens + rotating, hashed refresh tokens) + bcrypt password hashing | Stateless access tokens for request-path performance; revocable refresh tokens for real logout/session control. |
+| LLM | An `LLMClient` protocol with an OpenRouter-backed implementation and a deterministic rule-based mock | One abstraction, two implementations — the mock is CI-safe and requires no API key; swapping to real LLM output changes zero downstream code. |
+| Frontend | React 19 + TypeScript + Vite + React Router | Fast dev iteration, standard routing, no framework lock-in beyond React itself. |
+| Data fetching | TanStack Query | Caching, invalidation, and loading/error state without hand-rolled fetch logic. |
+| Localization | i18next | English and Russian UI copy from the same component tree. |
+| Testing | pytest (backend), Vitest + React Testing Library (frontend unit), Playwright (end-to-end) | Layered coverage: statistics/logic unit tests, API integration tests against a real test database, frontend component tests, and a real-browser end-to-end suite against the live stack. |
 
-## 4. Data flow for the core scenario (Investigate click)
+## 4. Request flow for the core scenario (release evaluation)
 
-1. Frontend calls `GET /experiments/{id}/investigation?primary_metric=conversion`.
-2. Backend loads session-level rows for both arms (one SQL query, indexed on `experiment_id`), computes the bounded segment scan (`INVESTIGATION.md` §1-3) in-process with pandas/scipy.
-3. Backend queries pre-computed `failure_labels` and `session_trajectories` for the top segments (`INVESTIGATION.md` §4-5).
-4. Backend assembles `Finding` objects (numbers fully computed), optionally calls `LLMClient.summarize_finding()` per top finding (with the guardrail from `AI_EVALUATION.md` §7), and returns a `InvestigationResult` Pydantic model.
-5. Frontend renders the Findings list, each expandable into segment detail (metric deltas + CI, failure-mode bar chart, trajectory pattern table) and links into the Sessions screen filtered to that segment.
+1. Frontend requests `POST /api/v1/domains/{domain}/experiments/{id}/release-evaluations`.
+2. The backend resolves the caller's project/organization membership (`get_project_context`) before touching any domain data — every domain-scoped route requires this, not just a `project_id` query parameter taken on faith.
+3. The domain adapter loads session-level data for both arms and computes the metric table, guardrail checks, and (if triggered) the bounded segment scan, with cluster-aware statistics throughout (`STATISTICS.md`).
+4. Pre-computed failure-attribution rows are joined in for the top segments; economics and data-quality status are attached.
+5. A deterministic rule table (`backend/investigation/recommend.py`) turns the assembled evidence into a verdict, and a template function (`backend/release/summary.py`) renders the explanation sentence — no LLM in either step.
+6. The evaluation, its evidence, and the generated alerts (if any) are persisted; an audit-log entry is written for the mutation.
+7. The frontend renders the verdict, evidence hierarchy, guardrails, economics, and representative sessions from one response.
 
 ## 5. Repository structure
 
 ```
 AI_agent_product_intelligence/
-├── docs/                          # this document set
-├── datagen/
-│   ├── generate.py                # CLI entry point
-│   ├── entities/                  # users.py, products.py, sessions.py, ...
-│   ├── effects/                   # one module per planted effect (DATA_MODEL.md §6), all version-specific
-│   ├── manifest.py                # writes generation_manifest.json
-│   ├── validation_output.py       # writes validation_ground_truth.parquet (DATA_MODEL.md §8) — kept out of load_to_postgres.py entirely
-│   └── load_to_postgres.py        # loads only application tables; does not know validation_output.py's output path
+├── docs/                      # this document set
+├── datagen/                   # seeded synthetic-data generator (demo/dev datasets)
 ├── backend/
 │   ├── app/
-│   │   ├── main.py
-│   │   ├── routers/                # overview.py, experiments.py, sessions.py, investigation.py, ai_quality.py
-│   │   ├── models/                 # SQLAlchemy ORM models (mirror DATA_MODEL.md — no ground-truth columns/tables)
-│   │   ├── schemas/                # Pydantic request/response models
-│   │   ├── analytics/
-│   │   │   ├── sql/                # .sql files or SQLAlchemy Core query builders, one per METRICS.md metric group (session-level, descriptive)
-│   │   │   ├── stats/              # clustering.py, continuous.py, bootstrap.py, correction.py, effect_size.py (STATISTICS.md §10)
-│   │   │   └── metrics.py          # thin orchestration
-│   │   ├── investigation/
-│   │   │   ├── segments.py         # pre-treatment dimension registry + scan (INVESTIGATION.md §1)
-│   │   │   ├── scoring.py          # EC score (§2)
-│   │   │   ├── failure_attribution.py  # excess-abandonment decomposition, §4
-│   │   │   ├── trajectory_attribution.py # §5
-│   │   │   └── recommend.py        # §6 decision table
-│   │   └── llm/
-│   │       ├── client.py           # protocol
-│   │       ├── anthropic_client.py
-│   │       ├── mock_client.py
-│   │       └── prompts/
-│   ├── alembic/
-│   └── tests/
-│       ├── unit/                   # stats functions, scoring
-│       └── integration/            # API routes against test DB
-├── tests/
-│   └── validate_ground_truth.py    # INVESTIGATION.md §7 — reads validation_ground_truth.parquet directly; not part of backend/app, never runs inside the API process
+│   │   ├── main.py             # FastAPI app, router mounting, CORS, error handlers
+│   │   ├── routers/            # auth, domains (generic per-domain API), ai_quality,
+│   │   │                       # ingestion, alerts, review, monitoring, notifications,
+│   │   │                       # audit, ops, langfuse_connector, postgres_business_connector
+│   │   ├── schemas/             # Pydantic request/response models
+│   │   ├── auth_deps.py         # authentication + project/org ownership dependencies
+│   │   └── dependencies.py
+│   ├── auth/                   # password hashing, tokens, org/project/membership service
+│   ├── domains/                # commerce/ and support/ domain adapters
+│   ├── analytics/              # metric queries + statistics (clustering, bootstrap, correction)
+│   ├── investigation/           # segment scan, scoring, attribution, recommendation
+│   ├── llm/                     # LLMClient protocol, OpenRouter client, mock client, prompts
+│   ├── release/                 # release-evaluation service and evidence assembly
+│   ├── review/                  # human review of AI attributions + quality metrics
+│   ├── quality/                 # data-quality checks
+│   ├── economics/               # cost/impact computation
+│   ├── connectors/              # langfuse/ and postgres_business/ ingestion connectors
+│   ├── monitoring/              # scheduled monitoring jobs + leasing
+│   ├── notifications/           # notification channels/rules
+│   ├── audit/                   # audit log
+│   └── project_config/          # per-project metric/guardrail/segment configuration
 ├── frontend/
-│   ├── app/
-│   │   ├── overview/
-│   │   ├── experiments/[id]/
-│   │   ├── experiments/[id]/investigation/
-│   │   ├── sessions/[id]/
-│   │   └── ai-quality/
-│   ├── components/                 # MetricCard, ConfidenceBadge, FunnelChart, TrajectoryTable, ...
-│   └── lib/api.ts
-├── scripts/
-│   └── evaluate_classifier.py      # AI_EVALUATION.md §5
-├── docker-compose.yml
-└── README.md
+│   ├── src/
+│   │   ├── pages/               # Overview, Experiment, ReleaseDecision, Investigation,
+│   │   │                        # Sessions, SessionDetail, AIQuality, Alerts, ReviewQueue,
+│   │   │                        # ProjectOverview, onboarding/, Login, Register, Landing
+│   │   ├── state/                # auth, active project/experiment, theme, language contexts
+│   │   ├── api/                  # typed API client + TanStack Query hooks
+│   │   └── i18n/                 # English/Russian locale files
+│   └── e2e/                      # Playwright end-to-end suite
+├── tests/                        # backend integration tests + ground-truth validation
+├── scripts/                      # CLI tools: classification runs, connector imports, benchmarks
+└── alembic/                      # database migrations
 ```
 
 ## 6. Cross-cutting conventions
 
-- Every number the frontend renders comes from a typed backend field, never computed client-side beyond formatting (percentages, rounding) — keeps the "deterministic metrics" guarantee end-to-end, not just at the SQL layer.
-- All timestamps stored and computed in UTC; display-layer localization is out of scope.
-- Config (`LLM_PROVIDER`, DB URL, pricing table version) via environment variables read once at startup, no runtime feature flags.
+- Every number the frontend renders comes from a typed backend field, never computed client-side beyond formatting.
+- Every domain-scoped route verifies project/organization membership before returning data — a `project_id` is never trusted as a bare filter.
+- All timestamps are stored and computed in UTC.
+- Configuration (database URL, JWT secret, LLM provider/model, connector credentials) is read from environment variables at startup; a non-production JWT secret is refused outside development/test environments.

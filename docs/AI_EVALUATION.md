@@ -1,6 +1,6 @@
 # LLM Failure Classification & AI Evaluation
 
-## 1. Role boundary (restated from PRD, load-bearing for this doc)
+## 1. Role boundary (load-bearing for this doc)
 
 The LLM classifies and summarizes. It never computes a metric, a statistical test, or a financial value. Every number displayed anywhere in the product traces to `METRICS.md`-defined SQL/Python, never to LLM output. This document covers the one place an LLM genuinely runs at analysis time: **failure-mode classification and evidence extraction**, plus lightweight narrative generation that only interpolates already-computed numbers.
 
@@ -33,11 +33,36 @@ Because ground truth exists only in `validation_ground_truth.parquet` (`DATA_MOD
 
 ## 5. Evaluating the pipeline
 
-Ground truth for this redesign is independent multi-label truth (`validation_ground_truth.parquet`'s `truth_unnecessary_clarification`, `truth_wrong_constraint_interpretation`, `truth_unsupported_product_claim`, `truth_retrieval_failure`, `truth_poor_ranking`, `truth_wrong_tool_selection` columns — a session can legitimately have more than one `True`), extended from the old single `ground_truth_failure_mode` column specifically for this redesign; the two ground-truth-reading scripts (`tests/validate_ground_truth.py`, `scripts/evaluate_classifier.py`) remain the only permitted readers.
+Ground truth for this redesign is independent multi-label truth (`validation_ground_truth.parquet`'s `truth_unnecessary_clarification`, `truth_wrong_constraint_interpretation`, `truth_unsupported_product_claim`, `truth_retrieval_failure`, `truth_poor_ranking`, `truth_wrong_tool_selection` columns — a session can legitimately have more than one `True`), extended from the old single `ground_truth_failure_mode` column specifically for this redesign; the two ground-truth-reading scripts (`tests/validate_ground_truth.py`, `scripts/evaluate_classifier.py`/`scripts/run_hybrid_benchmark.py`) remain the only permitted readers.
 
 Deterministic detectors are scored as ordinary binary classifiers (precision/recall/F1/support/false-positive/false-negative counts) against their respective `truth_*` column — target F1 ≥0.90 for `retrieval_failure`/`poor_ranking`, ≥0.85 for `wrong_tool_selection`. The semantic call's three outputs are scored independently as three binary classifiers (not collapsed back into one multiclass decision) plus multi-label aggregate metrics — micro/macro F1, exact-match ratio (all three labels correct), Hamming loss — with per-priority-class acceptance bars: `unnecessary_clarification` F1 ≥0.80, `wrong_constraint_interpretation` and `unsupported_product_claim` F1 ≥0.75.
 
 The evaluation methodology itself follows a strict development/held-out split: a 200-session set used to develop and debug the architecture is explicitly archived as development data and never re-presented as an unbiased result; a disjoint 200-session held-out set, constructed and persisted before any LLM call and never resampled after seeing predictions, is the only subset a final number is drawn from.
+
+## 5a. Current results (canonical — supersedes any exclusive-classifier number below)
+
+Produced by `scripts/run_hybrid_benchmark.py --subset new_holdout` against the held-out set described above, and served live by `GET /ai-quality/classifier-evaluation` (`hybrid_evaluation` field). This is the only evaluation that reflects the pipeline actually running today.
+
+**Dataset:** 200 sessions, `new_holdout` subset, evaluation seed 42 — disjoint from the development set, stratified on the independent `truth_*` columns, constructed before any LLM call.
+
+**Provenance:** provider `openrouter`, model `anthropic/claude-sonnet-5`, prompt version `semantic_attribution_v1`, detector version `deterministic_detectors_v1`, reasoning effort `none`, 900-token output budget.
+
+| Mechanism | Type | Precision | Recall | F1 | Support | Acceptance bar |
+|---|---|---|---|---|---|---|
+| `retrieval_failure` | deterministic | 1.00 | 1.00 | 1.00 | 31 | F1 ≥ 0.90 ✅ |
+| `poor_ranking` | deterministic | 1.00 | 1.00 | 1.00 | 30 | F1 ≥ 0.90 ✅ |
+| `wrong_tool_selection` | deterministic | 1.00 | 1.00 | 1.00 | 30 | F1 ≥ 0.85 ✅ |
+| `unnecessary_clarification` | semantic (LLM) | 0.839 | 0.979 | 0.904 | 48 | F1 ≥ 0.80 ✅ |
+| `wrong_constraint_interpretation` | semantic (LLM) | 0.722 | 1.000 | 0.839 | 39 | F1 ≥ 0.75 ✅ |
+| `unsupported_product_claim` | semantic (LLM) | 0.972 | 0.972 | 0.972 | 36 | F1 ≥ 0.75 ✅ |
+
+**Semantic aggregate (multi-label, three independent outputs per session):** micro-precision 0.829, micro-recall 0.984, micro-F1 0.900, macro-F1 0.905, exact-match ratio 0.875, Hamming loss 0.045. Coverage: 200/200 sessions successfully classified (0 API failures, 0 malformed responses, 6 total retries). Latency: p50 4.77s, p95 6.03s per session. Cost: $1.09 total, $0.0054/session. **All six acceptance bars met.**
+
+**Why the deterministic detectors score a perfect 1.0.** `retrieval_failure`, `poor_ranking`, and `wrong_tool_selection` are pure functions of structured, already-observable fields (`recommendations.satisfies_constraints`, the action-type sequence) that this synthetic dataset's generator computed with the identical rule used to label ground truth for these three mechanisms. A correctly-implemented detector is *expected* to match ground truth exactly here — this validates that the detector implements its documented rule correctly against this dataset's rule-derived ground truth. It is not evidence of overfitting or a leaked signal, and it says nothing about performance against noisier, real production telemetry where the same structured fields may be missing or ambiguous.
+
+## 5b. Deprecated: exclusive single-label classifier (historical only)
+
+An earlier architecture forced every session into exactly one of eight mutually-exclusive labels, asking an LLM to guess three mechanisms (`retrieval_failure`, `poor_ranking`, `wrong_tool_selection`) that are fully derivable from structured telemetry, and making genuinely co-occurring mechanisms compete for one slot. It scored 18.7% accuracy / macro-F1 0.267 on its own real-LLM evaluation with a 63% fallback rate — well below any usable bar — which is exactly why it was replaced, not a sign the current pipeline is broken. **This number must never be cited as current performance.** `scripts/evaluate_classifier.py` (the script that produces it) is marked deprecated in its own module docstring; nothing in the current classification pipeline writes to the `failure_labels` table it reads.
 
 ## 6. Automated evaluation vs. offline task success (relationship to `evaluations` table)
 
@@ -45,4 +70,15 @@ The evaluation methodology itself follows a strict development/held-out split: a
 
 ## 7. Narrative generation guardrail
 
-`summarize_finding()` is given a `Finding` object that already contains every number to be mentioned (segment name, deltas, CIs, EC score, dominant failure mode and its share of excess abandonment, dominant trajectory pattern) and is prompted to produce *prose that references these exact figures*, not to compute or estimate new ones. Output is post-validated by regex-extracting any numbers in the LLM's prose and checking they appear in the input `Finding` object; a mismatch is logged and the UI falls back to a template-only sentence (no LLM prose) for that finding. This is the concrete mechanism enforcing "LLM must not be responsible for calculating product metrics" at the narrative layer, where the risk of silent number invention is highest.
+`summarize_finding()` is given a `Finding` object that already contains every number to be mentioned (segment name, deltas, CIs, EC score, dominant failure mode and its share of excess abandonment, dominant trajectory pattern) and is prompted to produce *prose that references these exact figures*, not to compute or estimate new ones. Output is post-validated by regex-extracting any numbers in the LLM's prose and checking they appear in the input `Finding` object; a mismatch is logged and the UI falls back to a template-only sentence (no LLM prose) for that finding. This is the concrete mechanism enforcing "LLM must not be responsible for calculating product metrics" at the narrative layer, where the risk of silent number invention is highest. Release-decision explanation text (`backend/release/summary.py`) goes further and never calls an LLM at all — it is built entirely from template interpolation over already-persisted fields.
+
+## 8. Human review as a production-quality signal, separate from the offline benchmark
+
+The offline benchmark in §5a answers "how good is this pipeline against a known answer key." It does not answer "how much should a team using this in production actually trust it" — that requires real reviewers looking at real, unlabeled sessions. `backend/review/quality.py`'s `compute_attribution_quality` computes that signal independently:
+
+- **Confirmation rate** and **correction rate** per detector, from actual `confirmed`/`rejected`/corrected review decisions logged through the Review Queue — never inferred from the offline benchmark.
+- **Confidence-bucket calibration** — whether a detector's own stated confidence tracks how often reviewers actually agree with it, so a well-calibrated detector confirms more often at high confidence than at low.
+- **Confusion pairs** — the most common "detected as X, reviewer corrected to Y" pairs, surfaced on the AI Quality screen as a concrete signal of where a detector systematically misfires.
+- **A minimum-sample honesty gate**: a detector with fewer than `MIN_REVIEWS_FOR_QUALITY_CLAIM` (10) reviewed sessions reports `insufficient_review_data` rather than a misleadingly precise percentage — a detector reviewed 3 times never renders as "67% confirmed" without that caveat attached.
+
+By design, review outcomes never feed back into detection thresholds or retrain anything automatically — that would make the quality signal circular. It is a monitoring and trust signal for the humans operating the product, not a training loop.

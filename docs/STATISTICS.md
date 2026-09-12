@@ -1,5 +1,7 @@
 # Statistical Analysis Methodology
 
+> **Scope note:** the statistical engine described here is domain-generic and shared by every domain adapter; commerce-specific examples (session/user fields, specific metrics) are used for concreteness.
+
 ## 1. Principle
 
 No product decision in this system is made from a p-value alone. Every comparison reports **effect size + confidence interval + significance test**, computed with respect to the actual unit of randomization, and every automated multi-segment scan applies a **multiple-testing correction** before anything is surfaced as a "finding." The decision layer (`INVESTIGATION.md` §6) combines statistical signal with a minimum practical-significance threshold and guardrail checks.
@@ -70,7 +72,7 @@ An earlier draft of this document paired Welch's t-test (which explicitly does n
 ## 9. Known limitations, stated rather than hidden
 
 - **No sequential-testing correction.** The dataset is treated as already collected/complete (a fixed experiment window), so peeking/optional-stopping bias is out of scope; this is stated on the Experiment screen's methodology note rather than silently assumed away, since a real production version of this tool would need it.
-- **Segment interactions are not exhaustively tested via a full interaction model (e.g., ANOVA with interaction terms).** The bounded pairwise scan approximates this by directly testing the intersection segment as its own cluster comparison rather than fitting an interaction model. This is a deliberate scope cut (documented in `PRD.md` §1.3) and is called out in `INVESTIGATION.md`.
+- **Segment interactions are not exhaustively tested via a full interaction model (e.g., ANOVA with interaction terms).** The bounded pairwise scan approximates this by directly testing the intersection segment as its own cluster comparison rather than fitting an interaction model. This is a deliberate scope choice, called out in `INVESTIGATION.md`.
 - **Equal per-user weighting.** Aggregating to one row per user before testing (§2) means a user with one session and a user with ten sessions count equally in the cluster-level test. This is a deliberate, documented simplification versus a variance-weighted or mixed-effects (e.g. GEE) approach that would weight users by their information content — chosen because it is simpler to implement correctly and to explain, and because the dataset's session-per-user distribution is not extreme enough (§`DATA_MODEL.md` §5) for the unweighted approach to be misleading for this project's purposes.
 - **The secondary trajectory-pattern significance check (`INVESTIGATION.md` §5) is session-level, not cluster-level**, and is explicitly labeled "exploratory" in the UI for this reason — it is a descriptive mechanism analysis inside an already-cluster-validated segment finding, not the primary rollout-decision test, so the added complexity of a cluster-robust chi-square was judged not worth it for a secondary/explanatory signal.
 

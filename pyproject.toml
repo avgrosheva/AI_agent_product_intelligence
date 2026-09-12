@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ai-agent-product-intelligence"
 version = "0.1.0"
-description = "AI Agent Product Intelligence for Conversational Commerce — synthetic data, analytics, and investigation engine"
+description = "Release intelligence for AI agents — connects agent behavior, release experiments, business metrics, and human feedback into SHIP/HOLD/ROLLBACK decisions"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Proprietary" }

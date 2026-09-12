@@ -1,6 +1,8 @@
 # Automated Root-Cause Investigation
 
-This is the flagship feature (`PRD.md` §5: never cut). It is triggered by "Investigate" on an ambiguous or regressed experiment and produces the evidence chain: regression → segment → failure mode → trajectory → recommendation.
+> **Scope note:** this document specifies the investigation engine using the commerce reference domain's concrete dimensions and metrics as worked examples. The engine itself (bounded segment scan, excess-contribution scoring, Benjamini-Hochberg correction, failure/trajectory attribution, recommendation synthesis) is domain-generic — each domain (commerce, support, or a future one) supplies its own dimension registry and metric set through its adapter, and the same pipeline runs unchanged.
+
+This is the platform's flagship capability. It is triggered by "Investigate" on an ambiguous or regressed release comparison and produces the evidence chain: regression → segment → failure mode → trajectory → recommendation.
 
 ## 1. Bounded segment lattice of pre-treatment dimensions (not an open-ended search)
 
@@ -24,13 +26,13 @@ For a chosen primary metric (default: conversion rate; abandonment rate as the s
 - `user_share(s)` = count(distinct users touched by s) / count(distinct users in the experiment) — used in place of a raw session share, since the unit the decomposition should weight by is the unit the inference is computed on
 - **excess contribution** `EC(s) = user_share(s) × (segment_delta(s) − overall_delta)`
 
-`EC(s)` answers "how much worse (or better) is this segment than the average segment, weighted by how much of the user base it represents" — a segment that is both large and disproportionately bad drives the score up. This is a lightweight decomposition, not a full Shapley/Oaxaca-Blinder decomposition (that level of rigor is explicitly out of scope per `PRD.md` §1.3), and the methodology note in the UI says so. Session counts and session-level rates are still shown alongside for descriptive "volume" context, but `EC(s)` itself is computed on the cluster statistic so that its ranking is consistent with which segments actually clear the significance bar in §3.
+`EC(s)` answers "how much worse (or better) is this segment than the average segment, weighted by how much of the user base it represents" — a segment that is both large and disproportionately bad drives the score up. This is a lightweight decomposition, not a full Shapley/Oaxaca-Blinder decomposition — a deliberate scope choice, and the methodology note in the UI says so. Session counts and session-level rates are still shown alongside for descriptive "volume" context, but `EC(s)` itself is computed on the cluster statistic so that its ranking is consistent with which segments actually clear the significance bar in §3.
 
 Segments are ranked by `|EC(s)|` **after** the statistical filter in §3 removes non-significant/non-practical segments — a large EC on a non-significant segment is noise, not a finding.
 
 ## 3. Pipeline
 
-1. **Screen for ambiguity/regression** on the Experiment page: north star or any guardrail from `METRICS.md` moves in a statistically significant, practically significant direction (or two metrics move in conflicting directions — the literal trigger condition described in the brief), using the cluster-level test from `STATISTICS.md` §3. This produces the "Investigate" affordance; it is not itself part of the Investigation engine, just its entry condition.
+1. **Screen for ambiguity/regression** on the Experiment page: north star or any guardrail from `METRICS.md` moves in a statistically significant, practically significant direction, or two metrics move in conflicting directions, using the cluster-level test from `STATISTICS.md` §3. This produces the "Investigate" affordance; it is not itself part of the Investigation engine, just its entry condition.
 2. **Run the bounded scan** (§1) for the primary metric using the matched cluster-level test from `STATISTICS.md` §3, per segment.
 3. **Apply Benjamini-Hochberg correction** (`STATISTICS.md` §6) across all p-values from this run.
 4. **Filter** to segments passing correction + minimum effect size + the sample-size rule (`STATISTICS.md` §5).
@@ -41,7 +43,7 @@ Segments are ranked by `|EC(s)|` **after** the statistical filter in §3 removes
 
 ## 4. Failure-mode attribution: share of excess abandonment
 
-The brief's motivating example is that a failure mode can be common without being what actually drives a regression, and rare without being harmless — that contrast is worth surfacing, but it has to be built from a formula that cannot produce a nonsensical result. An earlier draft of this metric divided *every* abandoned v2 session labeled with failure X by the *total* excess-abandonment count — since the numerator wasn't itself restricted to "excess" sessions, it could exceed the denominator and report shares above 100%, and it was worded as "attributable to X," a causal claim the underlying correlation-based label doesn't support. Both problems are fixed below.
+A failure mode can be common without being what actually drives a regression, and rare without being harmless — that contrast is worth surfacing, but it has to be built from a formula that cannot produce a nonsensical result. An earlier draft of this metric divided *every* abandoned v2 session labeled with failure X by the *total* excess-abandonment count — since the numerator wasn't itself restricted to "excess" sessions, it could exceed the denominator and report shares above 100%, and it was worded as "attributable to X," a causal claim the underlying correlation-based label doesn't support. Both problems are fixed below.
 
 **Step 1 — total excess abandonment in a segment**, unchanged in spirit from the earlier draft, computed on session counts within the segment (this part is a simple rate-times-volume calculation, not a per-mode breakdown yet):
 
@@ -79,7 +81,7 @@ A small deterministic decision table (not an LLM judgment) maps the findings sha
 | Condition | Verdict |
 |---|---|
 | North star up, no guardrail breach, no significant negative segment | **Ship fully** |
-| North star up or flat, but ≥1 guardrail breached OR a significant negative segment with EC beyond threshold exists | **Hold / targeted fix** — the row this project's own dev dataset actually lands on (`PRD.md` SS2): aggregate conversion flat, abandonment/cost guardrails breached |
+| North star up or flat, but ≥1 guardrail breached OR a significant negative segment with EC beyond threshold exists | **Hold / targeted fix** — the row the commerce demo dataset's own flagship finding lands on: aggregate conversion flat, abandonment/latency guardrails breached |
 | North star down, or guardrail breach with no offsetting improvement | **Roll back** |
 
 The verdict is accompanied by: (a) the primary reason (top finding by `|EC(s)|`), (b) the blocking guardrail(s), and (c) a next action drawn from a small template library keyed to the dominant failure mode (e.g. `unnecessary_clarification` → "cap/gate clarification when ≥3 explicit constraints are already present; re-run offline evaluation; limited rollout"). The LLM may be used only to smooth the wording of the next-action sentence from the template, never to choose the verdict or invent the action.
@@ -94,4 +96,4 @@ The verdict is accompanied by: (a) the primary reason (top finding by `|EC(s)|`)
 4. **`exploratory_uplift`** and **`tool_selection_v2_improved`** are recoverable as *positive* findings (v2 better, correct sign) — the former on `constraint_count_bucket=0-1`, the latter as a general (non-segment-specific) finding in the overall tool-call-count/cost comparison — confirming the engine correctly signs improvements, not just regressions.
 5. No planted effect is missed (false negative), and no more than one spurious top-5 finding appears that doesn't map to a planted effect (bounding false positives, acknowledging the dataset has residual noise by design per `DATA_MODEL.md` §6).
 
-This test suite is the project's primary evidence that "the analytics system finds the planted ground truth," directly answering the brief's requirement #10, and it is written to be robust to the exact numeric values the generator happens to produce for a given seed — it checks the shape of the finding (segment, direction, mechanism, downstream effect), not a specific number.
+This test suite is the project's primary evidence that the analytics system finds the planted ground truth, and it is written to be robust to the exact numeric values the generator happens to produce for a given seed — it checks the shape of the finding (segment, direction, mechanism, downstream effect), not a specific number.

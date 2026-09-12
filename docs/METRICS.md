@@ -1,5 +1,7 @@
 # Metric Hierarchy
 
+> **Scope note:** this document uses the commerce reference domain's metric set as the concrete specification. Each domain adapter (commerce, support) registers its own metric hierarchy following this same structure — product metrics, diagnostic metrics, AI-quality metrics, guardrails, and economics — through the shared metrics/statistics engine.
+
 All formulas below are meant to be implemented as SQL (CTEs over the tables in `DATA_MODEL.md`) or thin pandas wrappers around the same SQL — never as LLM output. Every metric names the tables/columns it is computed from so there is a 1:1 mapping from this document to query code. The formulas below are all **session-level, descriptive** definitions, used for display everywhere in the product (Overview, Experiment, Sessions, AI Quality). When any of them is used to decide whether an experiment result is *significant* — the Experiment screen's badges and everything the Investigation engine ranks — the comparison is instead computed on the per-user cluster statistic described in `STATISTICS.md` §2, because the experiment randomizes users, not sessions. Both numbers (the descriptive session-level one and the inferential cluster-level one) are shown together where a significance verdict is displayed, so the two are never confused for each other.
 
 ## 1. North star
