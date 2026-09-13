@@ -223,3 +223,17 @@ cd frontend && npx playwright install chromium && npm run test:e2e   # end-to-en
 - The first analysis after a cold start (no warm cache) recomputes statistics and can take up to roughly a minute for a large experiment; subsequent requests are served from a per-project cache that invalidates automatically on new data.
 - Human-review-based quality signals need a minimum number of reviewed examples before they're reported as a rate rather than "not enough data yet" — this is a deliberate honesty guard, not a missing feature.
 - The demo dataset is synthetic, generated with known planted effects specifically so the investigation engine's findings can be checked against a real answer key.
+
+## Documentation
+
+- [Product Requirements](docs/PRD.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Statistics](docs/STATISTICS.md)
+- [Investigation Methodology](docs/INVESTIGATION.md)
+- [AI Evaluation](docs/AI_EVALUATION.md)
+- [Data Model](docs/DATA_MODEL.md)
+- [Roadmap](docs/ROADMAP.md)
+
+## License
+
+This project is licensed under the MIT License.

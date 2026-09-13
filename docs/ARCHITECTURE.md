@@ -88,7 +88,7 @@ One backend service (FastAPI), one frontend service (React/Vite), one PostgreSQL
 ## 5. Repository structure
 
 ```
-AI_agent_product_intelligence/
+ai-agent-product-intelligence/
 ├── docs/                      # this document set
 ├── datagen/                   # seeded synthetic-data generator (demo/dev datasets)
 ├── backend/

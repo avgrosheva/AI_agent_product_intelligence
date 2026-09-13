@@ -4,7 +4,7 @@ This document separates what the product does today from credible next steps. It
 
 ## Current product
 
-Everything described in the README and `PRD.md` §4 is implemented and in daily use in the demo environment: multi-project/multi-organization tenancy with role-based access and audit logging; data connectors for Langfuse and Postgres business data plus a generic ingestion API; per-project onboarding (data source, metrics, guardrails, segments, economics, monitoring); release evaluation with a deterministic SHIP/HOLD/ROLLBACK verdict and full evidence trail; automated, bounded investigation with multiple-testing correction; a hybrid deterministic + LLM failure-attribution pipeline with a held-out benchmark; human review with confirmation/correction tracking; scheduled monitoring and alerting; data-quality gating; and two reference domains (commerce, support) proving the engine generalizes.
+Everything described in the README and `PRD.md` §4 is implemented and validated end-to-end in the demo environment: multi-project/multi-organization tenancy with role-based access and audit logging; data connectors for Langfuse and Postgres business data plus a generic ingestion API; per-project onboarding (data source, metrics, guardrails, segments, economics, monitoring); release evaluation with a deterministic SHIP/HOLD/ROLLBACK verdict and full evidence trail; automated, bounded investigation with multiple-testing correction; a hybrid deterministic + LLM failure-attribution pipeline with a held-out benchmark; human review with confirmation/correction tracking; scheduled monitoring and alerting; data-quality gating; and two reference domains (commerce, support) proving the engine generalizes.
 
 ## Near-term product opportunities
 
